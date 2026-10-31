@@ -16,6 +16,6 @@ func BenchmarkSHA256_1MB(b *testing.B) {
 	b.SetBytes(int64(len(data)))
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = BenchmarkDigest(len(data), 1)
+		_, _ = BenchmarkDigest(len(data), 1)
 	}
 }
