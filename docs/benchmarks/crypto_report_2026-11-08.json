@@ -1,0 +1,20 @@
+{
+  "capabilities": {
+    "arch": "s390x",
+    "machine_type": "9175",
+    "has_cpacf": true,
+    "has_vector": true,
+    "has_nnpa": true,
+    "crypto_features": [
+      "msa"
+    ],
+    "endianness": "Big-Endian (MSB)"
+  },
+  "nist_verified": true,
+  "throughput_mbps": {
+    "sha256_1m": 4248.727860066565,
+    "sha256_64k": 4318.535152876145,
+    "sha512_1m": 6271.1158307064325,
+    "sha512_64k": 4656.109094498528
+  }
+}
