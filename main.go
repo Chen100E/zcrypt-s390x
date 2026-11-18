@@ -26,6 +26,14 @@ func main() {
 		runExporter(os.Args[2:])
 		return
 	}
+	// `--serve` is accepted at the top level as an alias for `export`, so the
+	// documented one-liner `./zcrypt --serve :9110` works without the
+	// subcommand. The leading flag has to be intercepted before flag.Parse,
+	// which would otherwise reject an unknown flag.
+	if len(os.Args) > 1 && (os.Args[1] == "--serve" || os.Args[1] == "-serve") {
+		runExporter(os.Args[1:])
+		return
+	}
 
 	jsonOutput := flag.Bool("json", false, "Output results in JSON format")
 	verifyOnly := flag.Bool("verify", false, "Run NIST test vector verification only")
