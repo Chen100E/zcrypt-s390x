@@ -1,0 +1,923 @@
+{
+  "aes256gcm": [
+    {
+      "block_size": 1024,
+      "encrypt_mbps": 7255.236864794145,
+      "decrypt_mbps": 6734.767486085647,
+      "iterations": 20000,
+      "bytes_per_iter": 1024
+    },
+    {
+      "block_size": 65536,
+      "encrypt_mbps": 14605.328958745204,
+      "decrypt_mbps": 14857.044919502747,
+      "iterations": 2000,
+      "bytes_per_iter": 65536
+    },
+    {
+      "block_size": 1048576,
+      "encrypt_mbps": 13687.583507091504,
+      "decrypt_mbps": 14138.553155198404,
+      "iterations": 200,
+      "bytes_per_iter": 1048576
+    }
+  ],
+  "aes_impl": {
+    "arch": "s390x",
+    "assembly_path": true,
+    "purego_build": false,
+    "endianness": "Big-Endian (MSB)",
+    "description": "CPACF KM/KMC/KMCTR/KMA assembly path selected by crypto/aes"
+  },
+  "capabilities": {
+    "arch": "s390x",
+    "machine_type": "9175",
+    "has_cpacf": true,
+    "has_vector": true,
+    "has_nnpa": true,
+    "crypto_features": [
+      "msa",
+      "msa1",
+      "msa2",
+      "msa3",
+      "msa4",
+      "msa5",
+      "msa6",
+      "msa7",
+      "msa8",
+      "msa9",
+      "msa10",
+      "msa11",
+      "msa12",
+      "msa13"
+    ],
+    "endianness": "Big-Endian (MSB)",
+    "max_msa_level": 13,
+    "has_aes": true,
+    "has_aes_gcm": true,
+    "has_sha3": true,
+    "has_ecc": true,
+    "has_ghash": true,
+    "has_prno": true,
+    "has_wrapped_key": true,
+    "facility_bits": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      6,
+      7,
+      8,
+      9,
+      12,
+      14,
+      15,
+      16,
+      17,
+      18,
+      19,
+      20,
+      21,
+      22,
+      23,
+      24,
+      25,
+      26,
+      27,
+      28,
+      30,
+      31,
+      32,
+      33,
+      34,
+      35,
+      36,
+      37,
+      38,
+      40,
+      41,
+      42,
+      43,
+      44,
+      45,
+      46,
+      47,
+      48,
+      49,
+      50,
+      51,
+      52,
+      53,
+      54,
+      55,
+      57,
+      58,
+      59,
+      60,
+      61,
+      69,
+      70,
+      71,
+      72,
+      73,
+      74,
+      75,
+      76,
+      77,
+      80,
+      81,
+      82,
+      84,
+      85,
+      86,
+      87,
+      129,
+      130,
+      131,
+      133,
+      134,
+      135,
+      146,
+      147,
+      148,
+      150,
+      151,
+      152,
+      155,
+      156,
+      165,
+      168,
+      170,
+      192,
+      193,
+      194,
+      196,
+      197,
+      198,
+      199,
+      200,
+      201
+    ]
+  },
+  "cpacf_query": {
+    "available": true,
+    "km": [
+      240,
+      112,
+      56,
+      56,
+      0,
+      0,
+      40,
+      40,
+      0,
+      0,
+      40,
+      40,
+      0,
+      0,
+      0,
+      1
+    ],
+    "kmc": [
+      240,
+      112,
+      56,
+      56,
+      0,
+      0,
+      0,
+      0,
+      16,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      1
+    ],
+    "kmctr": [
+      240,
+      112,
+      56,
+      56,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      1
+    ],
+    "kma": [
+      128,
+      0,
+      56,
+      56,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      1
+    ],
+    "kimd": [
+      240,
+      0,
+      0,
+      0,
+      252,
+      0,
+      0,
+      0,
+      64,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      1
+    ],
+    "klmd": [
+      240,
+      0,
+      0,
+      0,
+      252,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      1
+    ],
+    "kdsa": [
+      240,
+      112,
+      112,
+      0,
+      136,
+      136,
+      136,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      1
+    ]
+  },
+  "kernel_crypto": {
+    "available": true,
+    "algorithms": [
+      {
+        "name": "aes",
+        "driver": "aes-s390",
+        "module": "aes_s390",
+        "priority": 300,
+        "type": "cipher",
+        "async": false,
+        "selftest": "passed",
+        "hardware": true,
+        "alternatives": [
+          "aes-s390",
+          "aes-generic"
+        ]
+      },
+      {
+        "name": "blake2b-160",
+        "driver": "blake2b-160-generic",
+        "module": "blake2b_generic",
+        "priority": 100,
+        "type": "shash",
+        "async": false,
+        "selftest": "passed",
+        "hardware": false,
+        "alternatives": [
+          "blake2b-160-generic"
+        ]
+      },
+      {
+        "name": "blake2b-256",
+        "driver": "blake2b-256-generic",
+        "module": "blake2b_generic",
+        "priority": 100,
+        "type": "shash",
+        "async": false,
+        "selftest": "passed",
+        "hardware": false,
+        "alternatives": [
+          "blake2b-256-generic"
+        ]
+      },
+      {
+        "name": "blake2b-384",
+        "driver": "blake2b-384-generic",
+        "module": "blake2b_generic",
+        "priority": 100,
+        "type": "shash",
+        "async": false,
+        "selftest": "passed",
+        "hardware": false,
+        "alternatives": [
+          "blake2b-384-generic"
+        ]
+      },
+      {
+        "name": "blake2b-512",
+        "driver": "blake2b-512-generic",
+        "module": "blake2b_generic",
+        "priority": 100,
+        "type": "shash",
+        "async": false,
+        "selftest": "passed",
+        "hardware": false,
+        "alternatives": [
+          "blake2b-512-generic"
+        ]
+      },
+      {
+        "name": "cbc(aes)",
+        "driver": "cbc-aes-s390",
+        "module": "aes_s390",
+        "priority": 402,
+        "type": "skcipher",
+        "async": false,
+        "selftest": "passed",
+        "hardware": true,
+        "alternatives": [
+          "cbc-aes-s390"
+        ]
+      },
+      {
+        "name": "cbc(des)",
+        "driver": "cbc-des-s390",
+        "module": "des_s390",
+        "priority": 400,
+        "type": "skcipher",
+        "async": false,
+        "selftest": "passed",
+        "hardware": true,
+        "alternatives": [
+          "cbc-des-s390"
+        ]
+      },
+      {
+        "name": "cbc(des3_ede)",
+        "driver": "cbc-des3_ede-s390",
+        "module": "des_s390",
+        "priority": 400,
+        "type": "skcipher",
+        "async": false,
+        "selftest": "passed",
+        "hardware": true,
+        "alternatives": [
+          "cbc-des3_ede-s390"
+        ]
+      },
+      {
+        "name": "chacha20",
+        "driver": "chacha20-s390",
+        "module": "chacha_s390",
+        "priority": 900,
+        "type": "skcipher",
+        "async": false,
+        "selftest": "passed",
+        "hardware": true,
+        "alternatives": [
+          "chacha20-s390"
+        ]
+      },
+      {
+        "name": "cipher_null",
+        "driver": "cipher_null-generic",
+        "module": "kernel",
+        "priority": 0,
+        "type": "cipher",
+        "async": false,
+        "selftest": "passed",
+        "hardware": false,
+        "alternatives": [
+          "cipher_null-generic"
+        ]
+      },
+      {
+        "name": "compress_null",
+        "driver": "compress_null-generic",
+        "module": "kernel",
+        "priority": 0,
+        "type": "compression",
+        "async": false,
+        "selftest": "passed",
+        "hardware": false,
+        "alternatives": [
+          "compress_null-generic"
+        ]
+      },
+      {
+        "name": "crc32",
+        "driver": "crc32-vx",
+        "module": "crc32_vx_s390",
+        "priority": 200,
+        "type": "shash",
+        "async": false,
+        "selftest": "passed",
+        "hardware": true,
+        "alternatives": [
+          "crc32-vx"
+        ]
+      },
+      {
+        "name": "crc32be",
+        "driver": "crc32be-vx",
+        "module": "crc32_vx_s390",
+        "priority": 200,
+        "type": "shash",
+        "async": false,
+        "selftest": "passed",
+        "hardware": true,
+        "alternatives": [
+          "crc32be-vx"
+        ]
+      },
+      {
+        "name": "crc32c",
+        "driver": "crc32c-vx",
+        "module": "crc32_vx_s390",
+        "priority": 200,
+        "type": "shash",
+        "async": false,
+        "selftest": "passed",
+        "hardware": true,
+        "alternatives": [
+          "crc32c-vx",
+          "crc32c-generic"
+        ]
+      },
+      {
+        "name": "crct10dif",
+        "driver": "crct10dif-generic",
+        "module": "kernel",
+        "priority": 100,
+        "type": "shash",
+        "async": false,
+        "selftest": "passed",
+        "hardware": false,
+        "alternatives": [
+          "crct10dif-generic"
+        ]
+      },
+      {
+        "name": "ctr(aes)",
+        "driver": "ctr-aes-s390",
+        "module": "aes_s390",
+        "priority": 402,
+        "type": "skcipher",
+        "async": false,
+        "selftest": "passed",
+        "hardware": true,
+        "alternatives": [
+          "ctr-aes-s390"
+        ]
+      },
+      {
+        "name": "ctr(des)",
+        "driver": "ctr-des-s390",
+        "module": "des_s390",
+        "priority": 400,
+        "type": "skcipher",
+        "async": false,
+        "selftest": "passed",
+        "hardware": true,
+        "alternatives": [
+          "ctr-des-s390"
+        ]
+      },
+      {
+        "name": "ctr(des3_ede)",
+        "driver": "ctr-des3_ede-s390",
+        "module": "des_s390",
+        "priority": 400,
+        "type": "skcipher",
+        "async": false,
+        "selftest": "passed",
+        "hardware": true,
+        "alternatives": [
+          "ctr-des3_ede-s390"
+        ]
+      },
+      {
+        "name": "des",
+        "driver": "des-s390",
+        "module": "des_s390",
+        "priority": 300,
+        "type": "cipher",
+        "async": false,
+        "selftest": "passed",
+        "hardware": true,
+        "alternatives": [
+          "des-s390"
+        ]
+      },
+      {
+        "name": "des3_ede",
+        "driver": "des3_ede-s390",
+        "module": "des_s390",
+        "priority": 300,
+        "type": "cipher",
+        "async": false,
+        "selftest": "passed",
+        "hardware": true,
+        "alternatives": [
+          "des3_ede-s390"
+        ]
+      },
+      {
+        "name": "dh",
+        "driver": "dh-generic",
+        "module": "kernel",
+        "priority": 100,
+        "type": "kpp",
+        "async": false,
+        "selftest": "passed",
+        "hardware": false,
+        "alternatives": [
+          "dh-generic"
+        ]
+      },
+      {
+        "name": "digest_null",
+        "driver": "digest_null-generic",
+        "module": "kernel",
+        "priority": 0,
+        "type": "shash",
+        "async": false,
+        "selftest": "passed",
+        "hardware": false,
+        "alternatives": [
+          "digest_null-generic"
+        ]
+      },
+      {
+        "name": "ecb(aes)",
+        "driver": "ecb-aes-s390",
+        "module": "aes_s390",
+        "priority": 401,
+        "type": "skcipher",
+        "async": false,
+        "selftest": "passed",
+        "hardware": true,
+        "alternatives": [
+          "ecb-aes-s390"
+        ]
+      },
+      {
+        "name": "ecb(cipher_null)",
+        "driver": "ecb-cipher_null",
+        "module": "kernel",
+        "priority": 100,
+        "type": "skcipher",
+        "async": false,
+        "selftest": "passed",
+        "hardware": false,
+        "alternatives": [
+          "ecb-cipher_null"
+        ]
+      },
+      {
+        "name": "ecb(des)",
+        "driver": "ecb-des-s390",
+        "module": "des_s390",
+        "priority": 400,
+        "type": "skcipher",
+        "async": false,
+        "selftest": "passed",
+        "hardware": true,
+        "alternatives": [
+          "ecb-des-s390"
+        ]
+      },
+      {
+        "name": "ecb(des3_ede)",
+        "driver": "ecb-des3_ede-s390",
+        "module": "des_s390",
+        "priority": 400,
+        "type": "skcipher",
+        "async": false,
+        "selftest": "passed",
+        "hardware": true,
+        "alternatives": [
+          "ecb-des3_ede-s390"
+        ]
+      },
+      {
+        "name": "gcm(aes)",
+        "driver": "gcm-aes-s390",
+        "module": "aes_s390",
+        "priority": 900,
+        "type": "aead",
+        "async": false,
+        "selftest": "passed",
+        "hardware": true,
+        "alternatives": [
+          "gcm-aes-s390"
+        ]
+      },
+      {
+        "name": "ghash",
+        "driver": "ghash-s390",
+        "module": "ghash_s390",
+        "priority": 300,
+        "type": "shash",
+        "async": false,
+        "selftest": "passed",
+        "hardware": true,
+        "alternatives": [
+          "ghash-s390",
+          "ghash-generic"
+        ]
+      },
+      {
+        "name": "jitterentropy_rng",
+        "driver": "jitterentropy_rng",
+        "module": "kernel",
+        "priority": 100,
+        "type": "rng",
+        "async": false,
+        "selftest": "passed",
+        "hardware": false,
+        "alternatives": [
+          "jitterentropy_rng"
+        ]
+      },
+      {
+        "name": "lzo",
+        "driver": "lzo-generic",
+        "module": "kernel",
+        "priority": 0,
+        "type": "compression",
+        "async": false,
+        "selftest": "passed",
+        "hardware": false,
+        "alternatives": [
+          "lzo-generic",
+          "lzo-scomp"
+        ]
+      },
+      {
+        "name": "lzo-rle",
+        "driver": "lzo-rle-generic",
+        "module": "kernel",
+        "priority": 0,
+        "type": "compression",
+        "async": false,
+        "selftest": "passed",
+        "hardware": false,
+        "alternatives": [
+          "lzo-rle-generic",
+          "lzo-rle-scomp"
+        ]
+      },
+      {
+        "name": "md5",
+        "driver": "md5-generic",
+        "module": "kernel",
+        "priority": 0,
+        "type": "shash",
+        "async": false,
+        "selftest": "passed",
+        "hardware": false,
+        "alternatives": [
+          "md5-generic"
+        ]
+      },
+      {
+        "name": "pkcs1pad(rsa,sha512)",
+        "driver": "pkcs1pad(rsa-generic,sha512)",
+        "module": "kernel",
+        "priority": 100,
+        "type": "akcipher",
+        "async": false,
+        "selftest": "passed",
+        "hardware": false,
+        "alternatives": [
+          "pkcs1pad(rsa-generic,sha512)"
+        ]
+      },
+      {
+        "name": "rsa",
+        "driver": "rsa-generic",
+        "module": "kernel",
+        "priority": 100,
+        "type": "akcipher",
+        "async": false,
+        "selftest": "passed",
+        "hardware": false,
+        "alternatives": [
+          "rsa-generic"
+        ]
+      },
+      {
+        "name": "sha1",
+        "driver": "sha1-s390",
+        "module": "sha1_s390",
+        "priority": 300,
+        "type": "shash",
+        "async": false,
+        "selftest": "passed",
+        "hardware": true,
+        "alternatives": [
+          "sha1-s390",
+          "sha1-generic"
+        ]
+      },
+      {
+        "name": "sha224",
+        "driver": "sha224-s390",
+        "module": "sha256_s390",
+        "priority": 300,
+        "type": "shash",
+        "async": false,
+        "selftest": "passed",
+        "hardware": true,
+        "alternatives": [
+          "sha224-s390",
+          "sha224-generic"
+        ]
+      },
+      {
+        "name": "sha256",
+        "driver": "sha256-s390",
+        "module": "sha256_s390",
+        "priority": 300,
+        "type": "shash",
+        "async": false,
+        "selftest": "passed",
+        "hardware": true,
+        "alternatives": [
+          "sha256-s390",
+          "sha256-generic"
+        ]
+      },
+      {
+        "name": "sha3-224",
+        "driver": "sha3-224-s390",
+        "module": "sha3_256_s390",
+        "priority": 300,
+        "type": "shash",
+        "async": false,
+        "selftest": "passed",
+        "hardware": true,
+        "alternatives": [
+          "sha3-224-s390"
+        ]
+      },
+      {
+        "name": "sha3-256",
+        "driver": "sha3-256-s390",
+        "module": "sha3_256_s390",
+        "priority": 300,
+        "type": "shash",
+        "async": false,
+        "selftest": "passed",
+        "hardware": true,
+        "alternatives": [
+          "sha3-256-s390"
+        ]
+      },
+      {
+        "name": "sha3-384",
+        "driver": "sha3-384-s390",
+        "module": "sha3_512_s390",
+        "priority": 300,
+        "type": "shash",
+        "async": false,
+        "selftest": "passed",
+        "hardware": true,
+        "alternatives": [
+          "sha3-384-s390"
+        ]
+      },
+      {
+        "name": "sha3-512",
+        "driver": "sha3-512-s390",
+        "module": "sha3_512_s390",
+        "priority": 300,
+        "type": "shash",
+        "async": false,
+        "selftest": "passed",
+        "hardware": true,
+        "alternatives": [
+          "sha3-512-s390"
+        ]
+      },
+      {
+        "name": "sha384",
+        "driver": "sha384-s390",
+        "module": "sha512_s390",
+        "priority": 300,
+        "type": "shash",
+        "async": false,
+        "selftest": "passed",
+        "hardware": true,
+        "alternatives": [
+          "sha384-s390",
+          "sha384-generic"
+        ]
+      },
+      {
+        "name": "sha512",
+        "driver": "sha512-s390",
+        "module": "sha512_s390",
+        "priority": 300,
+        "type": "shash",
+        "async": false,
+        "selftest": "passed",
+        "hardware": true,
+        "alternatives": [
+          "sha512-s390",
+          "sha512-generic"
+        ]
+      },
+      {
+        "name": "stdrng",
+        "driver": "drbg_nopr_hmac_sha512",
+        "module": "kernel",
+        "priority": 221,
+        "type": "rng",
+        "async": false,
+        "selftest": "passed",
+        "hardware": false,
+        "alternatives": [
+          "drbg_nopr_hmac_sha512",
+          "drbg_nopr_hmac_sha256",
+          "drbg_nopr_hmac_sha384",
+          "drbg_nopr_hmac_sha1",
+          "drbg_nopr_sha256",
+          "drbg_nopr_sha512",
+          "drbg_nopr_sha384",
+          "drbg_nopr_sha1",
+          "drbg_nopr_ctr_aes256",
+          "drbg_nopr_ctr_aes192",
+          "drbg_nopr_ctr_aes128",
+          "drbg_pr_hmac_sha512",
+          "drbg_pr_hmac_sha256",
+          "drbg_pr_hmac_sha384",
+          "drbg_pr_hmac_sha1",
+          "drbg_pr_sha256",
+          "drbg_pr_sha512",
+          "drbg_pr_sha384",
+          "drbg_pr_sha1",
+          "drbg_pr_ctr_aes256",
+          "drbg_pr_ctr_aes192",
+          "drbg_pr_ctr_aes128"
+        ]
+      },
+      {
+        "name": "xts(aes)",
+        "driver": "xts-aes-s390",
+        "module": "aes_s390",
+        "priority": 402,
+        "type": "skcipher",
+        "async": false,
+        "selftest": "passed",
+        "hardware": true,
+        "alternatives": [
+          "xts-aes-s390"
+        ]
+      }
+    ],
+    "hardware_count": 28,
+    "total_count": 45
+  },
+  "nist_gcm_vectors_passed": 4,
+  "nist_verified": true,
+  "throughput_mbps": {
+    "sha256_1m": 4358.2140927381815,
+    "sha256_64k": 4335.1673981539125,
+    "sha512_1m": 6890.535201379945,
+    "sha512_64k": 6693.737927843647
+  }
+}
