@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/Chen100E/zcrypt-s390x/pkg/cpacf"
 )
 
 // fpFor is a test fingerprint matching the reference machine.
@@ -494,6 +496,15 @@ func TestBuildBaselineMetricsProducesRealNumbers(t *testing.T) {
 func TestCompareAgainstOwnBaselineIsStable(t *testing.T) {
 	if testing.Short() {
 		t.Skip("baseline comparison is slow; skipped under -short")
+	}
+	// Only meaningful on the reference platform. The 60% tolerance here exists to
+	// absorb scheduler jitter on a machine that is otherwise idle; on a shared
+	// amd64 CI runner running software AES-GCM, consecutive measurements of the
+	// same code can legitimately differ by more than that, and a failure there
+	// would be a false alarm about the comparison machinery rather than a real
+	// finding.
+	if !cpacf.Detect().HasCPACF {
+		t.Skip("self-comparison stability is a reference-platform check; no CPACF here")
 	}
 	metrics, err := BuildBaselineMetrics(1)
 	if err != nil {

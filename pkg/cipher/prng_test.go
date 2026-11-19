@@ -89,8 +89,11 @@ func TestEntropyPoolStatus(t *testing.T) {
 	if st.Error != "" {
 		t.Skipf("entropy pool unreadable: %s", st.Error)
 	}
-	if st.PoolSize != 256 {
-		t.Errorf("pool size = %d, want 256", st.PoolSize)
+	// poolsize is 256 on every kernel since 5.x, but older kernels used 4096.
+	// The invariant that matters is that entropy_avail is bounded by it, not the
+	// specific capacity, so only a nonsensical value is an error.
+	if st.PoolSize <= 0 {
+		t.Errorf("pool size = %d, must be positive", st.PoolSize)
 	}
 	if st.EntropyAvail < 0 || st.EntropyAvail > st.PoolSize {
 		t.Errorf("entropy_avail = %d, outside 0..%d", st.EntropyAvail, st.PoolSize)
