@@ -751,6 +751,50 @@ nothing. A tick takes about 18 ms at scale 1.
 
 ---
 
+---
+
+## 🏛️ Why this needs a permanent s390x host
+
+This project is developed and validated on an IBM LinuxONE Community Cloud
+instance (machine type 9175, Ubuntu 22.04, **MSA-13**). That instance is a
+**60-day trial**, which cannot support what this tool exists to do.
+
+**What a trial window cannot support:**
+
+1. **Hardware-drift baselines.** CPACF throughput is a property of the *host*
+   (microcode level, MSA generation, core allocation). A baseline captured on a
+   machine that disappears is worthless — regression detection needs the same
+   physical host measured across weeks.
+2. **Cross-generation comparison.** Establishing how MSA-13 compares to MSA-9 or
+   MSA-12 requires a stable reference host that does not expire mid-series.
+3. **Continuous CI for hardware paths.** The `/proc/crypto` backend assertions and
+   CPACF Query dumps are only meaningful if they run on real mainframe hardware
+   on every change. An expiring runner turns that into a one-off snapshot.
+4. **Kernel-crypto API tracking.** Which driver the kernel selects
+   (`aes-s390` vs `aes-generic`) changes with kernel and microcode updates. Only
+   a long-lived host can show whether a new kernel silently regressed to the
+   portable path.
+
+**What the permanent VM would run:**
+
+- A daily hardware-crypto baseline with a stored reference, so a microcode or
+  kernel update that quietly disables CPACF is caught the day it lands.
+- The Prometheus exporter as a long-lived service exposing
+  `zcrypt_kernel_crypto_hw{algorithm="aes"}` continuously.
+- Multi-toolchain builds verifying that NIST / SP 800-38A vectors stay bit-exact
+  on big-endian across Go releases.
+- Sustained PRNG entropy monitoring (`/proc/sys/kernel/random/entropy_avail`)
+  under real load.
+
+**Validated on:** IBM LinuxONE III, machine type `9175`, Ubuntu 22.04 LTS,
+`s390x` big-endian, **MSA-13**, Go 1.23.2. CPACF hardware path confirmed via
+`/proc/crypto` (`aes-s390` prio 300, `gcm(aes)-s390` prio 900).
+
+**Measured:** AES-256-GCM ~13,670 MB/s encrypt / ~14,110 MB/s decrypt at 1 MB
+buffers; ~100× faster than the portable C path under OpenSSL.
+
+---
+
 ## 📄 License
 
 Licensed under the [MIT License](./LICENSE). Contributions and PRs for IBM Z and LinuxONE optimizations are warmly welcomed!
