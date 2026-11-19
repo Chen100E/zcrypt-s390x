@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Chen100E/zcrypt-s390x/pkg/cipher"
+	"github.com/Chen100E/zcrypt-s390x/pkg/cpacf"
 )
 
 // syncBuffer is a bytes.Buffer safe for concurrent use. The watch loop writes
@@ -272,6 +273,16 @@ func TestMachineFingerprintHasIdentity(t *testing.T) {
 	if fp.MaxMSALevel <= 0 {
 		t.Error("no MSA level")
 	}
+	// The fingerprint must use the Query-refined MSA level, not the unrefined
+	// STFLE-only value. On the reference machine those differ (12 vs 13), and
+	// since MaxMSALevel is a hard comparability requirement, an unrefined value
+	// would make every watch tick incomparable with a report-path baseline.
+	refined := cipherCaps()
+	refined = cpacfRefine(refined)
+	if fp.MaxMSALevel != refined.MaxMSALevel {
+		t.Errorf("fingerprint MSA level = %d, want the Query-refined %d",
+			fp.MaxMSALevel, refined.MaxMSALevel)
+	}
 	if fp.GoVersion == "" {
 		t.Error("no Go version")
 	}
@@ -282,6 +293,12 @@ func TestMachineFingerprintHasIdentity(t *testing.T) {
 		t.Log("kernel release unreadable; /proc/sys/kernel/osrelease missing")
 	}
 	t.Logf("fingerprint: %+v", fp)
+}
+
+// cpacfRefine applies the CPACF Query refinement, mirroring what
+// machineFingerprint does internally so the test can assert against it.
+func cpacfRefine(caps cpacf.HardwareCapabilities) cpacf.HardwareCapabilities {
+	return cpacf.RefineWithQuery(caps, cpacf.ProbeQuery(caps))
 }
 
 // TestFirstLine covers the error-compaction helper.

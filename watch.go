@@ -118,6 +118,11 @@ func (w *watcher) tick(ctx context.Context, seq int) error {
 	}
 
 	caps := cpacf.Detect()
+	// Refine with the Query result so the reported MSA level matches what the
+	// report path and the baseline fingerprint use. Detect() alone reports MSA-12
+	// on this machine because MSA-13 has no STFLE bit.
+	query := cpacf.ProbeQuery(caps)
+	caps = cpacf.RefineWithQuery(caps, query)
 	t.MSALevel = caps.MaxMSALevel
 
 	// Correctness first: a monitor that reports throughput for a broken
@@ -196,7 +201,17 @@ func joinErr(existing, add string) string {
 }
 
 // machineFingerprint builds the comparability identity for a host.
+//
+// It refines the capability set with the CPACF Query result before reading the
+// MSA level, because Detect() alone only knows what STFLE announced. Several MSA
+// levels (1, 2, 6, 7, 10, 11, 13) have no STFLE bit, so an unrefined Detect()
+// reports MSA-12 on this machine while the Query-refined value is MSA-13. That
+// difference matters: MaxMSALevel is one of the hard comparability requirements,
+// so an unrefined fingerprint would declare every measurement incomparable with a
+// baseline captured by the report path.
 func machineFingerprint(caps cpacf.HardwareCapabilities) cipher.MachineFingerprint {
+	query := cpacf.ProbeQuery(caps)
+	caps = cpacf.RefineWithQuery(caps, query)
 	return cipher.MachineFingerprint{
 		Arch:        caps.Arch,
 		MachineType: caps.MachineType,

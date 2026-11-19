@@ -90,3 +90,66 @@ jobs:
           mkdir -p bin
           go build -v -ldflags "-s -w" -o bin/zcrypt-${{ matrix.goos }}-${{ matrix.goarch }} ./main.go
           ls -lh bin/
+
+  perf-regression:
+    name: Performance Regression (advisory)
+    runs-on: ubuntu-latest
+    # Advisory, not a gate. GitHub-hosted runners are shared VMs whose
+    # throughput varies by a factor of two between runs, and none of them are
+    # s390x. A hard failure here would fire on noise and on the architecture
+    # mismatch rather than on a real regression, which is worse than no check at
+    # all: it trains people to ignore the job.
+    #
+    # What this job does check is that the whole regression machinery still
+    # works end to end -- that the baseline parses, the comparison runs, and the
+    # exit codes mean what the shell script expects. The actual numeric
+    # comparison is meaningful only on the reference machine, where
+    # scripts/check-regression.sh --strict is run deliberately.
+    continue-on-error: true
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      - name: Build zcrypt
+        run: go build -o zcrypt .
+
+      - name: Validate the committed baseline
+        run: python3 scripts/validate-baseline.py docs/benchmarks/baseline.json
+
+      - name: Run the regression comparison (advisory)
+        run: |
+          set +e
+          ./scripts/check-regression.sh --tolerance 20
+          STATUS=$?
+          set -e
+          case "$STATUS" in
+            0) echo "::notice::no regressions reported" ;;
+            1) echo "::warning::performance regressed beyond 20% (advisory; runner is not the reference machine)" ;;
+            2) echo "::warning::comparison could not be performed (expected: runner is amd64, baseline is s390x)" ;;
+            *) echo "::warning::unexpected exit status $STATUS" ;;
+          esac
+          # Deliberately exit 0: see the job comment.
+          exit 0
+
+      - name: Verify the sweep still runs
+        run: |
+          # The sweep is the most complex measurement path in the project, so it
+          # gets a smoke run in CI even though the numbers are meaningless here.
+          # A crash or a validation failure would be a real defect.
+          ./zcrypt --sweep --sweep-scale 1 | head -40
+
+      - name: Upload regression report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: perf-regression-report
+          path: |
+            /tmp/zcrypt-regression.json
+            /tmp/zcrypt-regression.log
+          if-no-files-found: warn
+          retention-days: 7
