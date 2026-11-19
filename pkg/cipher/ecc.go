@@ -440,14 +440,31 @@ func ECCKernelReport() []ECCKernelInfo {
 
 		// KDSA usability comes from the CPACF Query bitmap, which is the
 		// authoritative statement of what the chip implements. Both the sign
-		// and verify function codes must be present for the pair to be usable.
+		// and verify function codes must be present for the pair to be usable,
+		// because a caller that can sign but not verify (or vice versa) cannot
+		// complete a signature exchange.
+		//
+		// This is not hypothetical: on the reference machine the KDSA bitmap is
+		// f0 70 70 00 88 88 88 00 ... — code 32 (Ed25519 sign) is set but code
+		// 33 (Ed25519 verify) is not, so HasEDDSA is clear and Go takes the
+		// edwards25519 path even though the sign instruction exists.
 		if query.Available {
-			row.KDSAUsable = query.KDSA.Has(info.SignCode) && query.KDSA.Has(info.VerifyCode)
+			hasSign := query.KDSA.Has(info.SignCode)
+			hasVerify := query.KDSA.Has(info.VerifyCode)
+			row.KDSAUsable = hasSign && hasVerify
+			if hasSign != hasVerify {
+				row.Notes = fmt.Sprintf(
+					"KDSA is asymmetric here: sign code %d present=%v, verify code %d present=%v; "+
+						"Go requires both, so it uses the portable fallback",
+					info.SignCode, hasSign, info.VerifyCode, hasVerify)
+				out = append(out, row)
+				continue
+			}
 		}
 		if row.KDSAUsable {
 			row.Notes = "KDSA issues directly from the Go crypto/ecdsa path; no kernel driver needed"
 		} else if query.Available {
-			row.Notes = "KDSA function codes absent from the Query bitmap; Go uses the portable fallback"
+			row.Notes = "both KDSA function codes absent from the Query bitmap; Go uses the portable fallback"
 		} else {
 			row.Notes = "CPACF unavailable on this host"
 		}
