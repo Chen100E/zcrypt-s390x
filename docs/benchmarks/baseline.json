@@ -1,0 +1,104 @@
+{
+  "schema_version": 1,
+  "captured_at": "2026-11-18T06:58:26Z",
+  "fingerprint": {
+    "arch": "s390x",
+    "machine_type": "9175",
+    "max_msa_level": 13,
+    "go_version": "go1.23.2",
+    "kernel": "5.15.0-56-generic"
+  },
+  "metrics": [
+    {
+      "name": "aes256gcm.encrypt.1mib",
+      "mbps": 12365.318496599846,
+      "unit": "MB/s",
+      "higher_is_better": true
+    },
+    {
+      "name": "aes256gcm.decrypt.1mib",
+      "mbps": 12354.7620503716,
+      "unit": "MB/s",
+      "higher_is_better": true
+    },
+    {
+      "name": "aes256cbc.encrypt.1mib",
+      "mbps": 3574.7000603230636,
+      "unit": "MB/s",
+      "higher_is_better": true
+    },
+    {
+      "name": "aes256ctr.encrypt.1mib",
+      "mbps": 3253.1790675819484,
+      "unit": "MB/s",
+      "higher_is_better": true
+    },
+    {
+      "name": "sha256.1mib",
+      "mbps": 4302.710298730722,
+      "unit": "MB/s",
+      "higher_is_better": true
+    },
+    {
+      "name": "sha512.1mib",
+      "mbps": 6830.5497704593745,
+      "unit": "MB/s",
+      "higher_is_better": true
+    },
+    {
+      "name": "sha3-256.purego.1mib",
+      "mbps": 69.61679580941976,
+      "unit": "MB/s",
+      "higher_is_better": true
+    },
+    {
+      "name": "p256.sign",
+      "mbps": 45229.01712822879,
+      "unit": "ops/s",
+      "higher_is_better": true
+    },
+    {
+      "name": "p256.verify",
+      "mbps": 20684.512574632306,
+      "unit": "ops/s",
+      "higher_is_better": true
+    },
+    {
+      "name": "p384.sign",
+      "mbps": 25928.499569586907,
+      "unit": "ops/s",
+      "higher_is_better": true
+    },
+    {
+      "name": "p384.verify",
+      "mbps": 10398.43150059245,
+      "unit": "ops/s",
+      "higher_is_better": true
+    },
+    {
+      "name": "p521.sign",
+      "mbps": 17450.49947692128,
+      "unit": "ops/s",
+      "higher_is_better": true
+    },
+    {
+      "name": "p521.verify",
+      "mbps": 5986.764759807256,
+      "unit": "ops/s",
+      "higher_is_better": true
+    },
+    {
+      "name": "ed25519.sign",
+      "mbps": 17364.758916369585,
+      "unit": "ops/s",
+      "higher_is_better": true
+    },
+    {
+      "name": "ed25519.verify",
+      "mbps": 6397.827809502118,
+      "unit": "ops/s",
+      "higher_is_better": true
+    }
+  ],
+  "notes": "captured by zcrypt --write-baseline on 9175"
+}
