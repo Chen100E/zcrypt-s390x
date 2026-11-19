@@ -88,7 +88,10 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
         run: |
           mkdir -p bin
-          go build -v -ldflags "-s -w" -o bin/zcrypt-${{ matrix.goos }}-${{ matrix.goarch }} ./main.go
+          # Build the package, not ./main.go: the main package has more than one
+          # file (report.go, watch.go, platform.go), and naming a single file
+          # excludes the rest, which produces "undefined: runSweep" and friends.
+          go build -v -ldflags "-s -w" -o bin/zcrypt-${{ matrix.goos }}-${{ matrix.goarch }} .
           ls -lh bin/
 
   perf-regression:

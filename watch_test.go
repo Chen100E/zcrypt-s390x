@@ -106,8 +106,12 @@ func TestWatchLoopEmitsTicksAndStops(t *testing.T) {
 
 	// Parse every emitted line as JSON. The immediate tick plus roughly seven
 	// interval ticks should be present.
+	// At least the immediate tick plus one interval tick. Requiring more would
+	// make the test fail on a slow CI runner where a single tick's benchmark
+	// (software AES-GCM there, not KMA) exceeds the interval and the ticker
+	// legitimately drops ticks.
 	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
-	if len(lines) < 3 {
+	if len(lines) < 2 {
 		t.Fatalf("only %d ticks emitted in %s: %q", len(lines), elapsed, out.String())
 	}
 
@@ -137,8 +141,14 @@ func TestWatchLoopEmitsTicksAndStops(t *testing.T) {
 		if tick.SHA256 <= 0 {
 			t.Errorf("tick %d has non-positive SHA-256 throughput %v", i, tick.SHA256)
 		}
-		if tick.MSALevel <= 0 {
-			t.Errorf("tick %d has no MSA level", i)
+		// MSA level is 0 on a host with no CPACF (amd64/arm64 CI runners), which
+		// is the correct value there, not a fault. Only require a positive level
+		// when the machine actually has CPACF.
+		if cipherCaps().HasCPACF && tick.MSALevel <= 0 {
+			t.Errorf("tick %d has no MSA level on a CPACF machine", i)
+		}
+		if !cipherCaps().HasCPACF && tick.MSALevel != 0 {
+			t.Errorf("tick %d claims MSA-%d on a host without CPACF", i, tick.MSALevel)
 		}
 		seqs = append(seqs, tick.Seq)
 	}
@@ -270,8 +280,15 @@ func TestMachineFingerprintHasIdentity(t *testing.T) {
 	if fp.Arch == "" {
 		t.Error("no architecture")
 	}
-	if fp.MaxMSALevel <= 0 {
-		t.Error("no MSA level")
+	// MaxMSALevel is 0 on a host without CPACF, which is correct: CI runners are
+	// amd64 and have no MSA at all. Asserting a positive level here would make
+	// the test fail on every architecture the project cross-compiles for.
+	if !cipherCaps().HasCPACF {
+		if fp.MaxMSALevel != 0 {
+			t.Errorf("host has no CPACF but fingerprint claims MSA-%d", fp.MaxMSALevel)
+		}
+	} else if fp.MaxMSALevel <= 0 {
+		t.Error("host has CPACF but no MSA level")
 	}
 	// The fingerprint must use the Query-refined MSA level, not the unrefined
 	// STFLE-only value. On the reference machine those differ (12 vs 13), and
