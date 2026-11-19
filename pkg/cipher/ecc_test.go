@@ -9,6 +9,7 @@ import (
 	"crypto/sha256"
 	"crypto/sha512"
 	"math/big"
+	"strings"
 	"testing"
 )
 
@@ -401,6 +402,34 @@ func TestECCKernelReportFindsNoECDSAOnThisHost(t *testing.T) {
 		if r.KDSAUsable && r.SignCode == 0 && r.VerifyCode == 0 {
 			t.Errorf("%s: KDSA usable but no function codes", r.Curve)
 		}
+	}
+}
+
+// TestECCReportExplainsAsymmetricKDSA proves the report distinguishes "no KDSA
+// at all" from "KDSA present for one operation but not its pair". The latter is
+// what happens for Ed25519 on the reference machine: the bitmap has sign code 32
+// but not verify code 33, so Go falls back despite the sign instruction existing.
+// Without this distinction the report would say "codes absent" when one is
+// demonstrably present, which is the kind of imprecision that erodes trust in
+// every other number.
+func TestECCReportExplainsAsymmetricKDSA(t *testing.T) {
+	for _, r := range ECCKernelReport() {
+		if r.KDSAUsable {
+			if !strings.Contains(r.Notes, "issues directly") {
+				t.Errorf("%s: usable but note = %q", r.Curve, r.Notes)
+			}
+			continue
+		}
+		// Not usable: the note must say why, and must not claim both codes are
+		// absent if only one is.
+		if r.Notes == "" {
+			t.Errorf("%s: not usable but no explanation", r.Curve)
+		}
+		if strings.Contains(r.Notes, "both KDSA function codes absent") &&
+			strings.Contains(r.Notes, "present=true") {
+			t.Errorf("%s: note contradicts itself: %q", r.Curve, r.Notes)
+		}
+		t.Logf("%s: %s", r.Curve, r.Notes)
 	}
 }
 

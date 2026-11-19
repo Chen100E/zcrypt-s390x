@@ -439,6 +439,318 @@ CI, where it correctly reports no CPACF.
 
 ---
 
+## 🔀 AES Mode Comparison: CBC / CTR / GCM
+
+GCM is not the only mode that matters on a mainframe, and the mode you pick
+determines which CPACF instruction you get — which determines the throughput.
+`zcrypt` measures all four and records the mapping:
+
+| Mode | CPACF instruction | MSA | Go call path | Parallel | Auth |
+|------|-------------------|-----|--------------|:--------:|:----:|
+| ECB | `KM` | 1 | `(*aesCipherAsm).Encrypt` | no | no |
+| CBC | `KMC` | 1 | `NewCBCEncrypter` → `kmc()` | no | no |
+| CTR | `KM` | 1 | `(*aesctr).refill` → `cryptBlocks` + Go XOR | yes | no |
+| GCM | `KMA` | 8 | `NewGCM` → `gcmKMA` | yes | yes |
+
+### Measured throughput, AES-256
+
+| Buffer | ECB enc/dec | CBC enc/dec | CTR enc/dec | GCM enc/dec |
+|-------:|------------:|------------:|------------:|------------:|
+| 1 KiB | 424 / 413 | 2,731 / 6,475 | 2,186 / 1,493 | **6,128 / 6,584** |
+| 64 KiB | 423 / 416 | 3,772 / 16,106 | 3,253 / 3,247 | **14,687 / 14,590** |
+| 1 MiB | 420 / 419 | 3,559 / 15,563 | 3,112 / 2,952 | **13,241 / 14,163** |
+
+MB/s. `./zcrypt` reproduces these; every row is verified by a round trip before
+its timing is counted.
+
+### CTR is slower than CBC, and that is not a typo
+
+The textbook answer is that counter mode is the more parallel construction and
+should beat CBC. On s390x with Go 1.23 it does not, and the reason is in the
+source rather than in the measurement:
+
+`crypto/aes/ctr_s390x.go` does **not** issue `KMCTR`. It keeps a 512-byte buffer
+of ECB-encrypted counter blocks, refills it with `cryptBlocks()` — that is `KM` —
+and XORs the keystream into the caller's buffer in Go. `KMCTR` is only reached
+inside the AES-GCM implementation, and only on machines below MSA-8.
+
+CBC, by contrast, calls `KMC` once for the whole buffer. The chaining happens
+on-chip, the CPU never touches the data, and decrypt handles the entire buffer in
+a single instruction — which is why CBC decrypt at 16,106 MB/s is the fastest
+number in the table.
+
+The practical consequence: if you are choosing a mode on this platform and you
+control both ends, GCM wins outright (KMA fuses the AES rounds with GHASH), CBC
+is the best non-authenticated option, and CTR is the slowest of the three despite
+being the mode whose hardware instruction exists.
+
+`./zcrypt --verify` checks 8 SP 800-38A Appendix F vectors (ECB F.1.x, CBC
+F.2.x, CTR F.5.x across AES-128/192/256) bit-for-bit in both directions. Every
+expected ciphertext was reproduced independently with `openssl enc -nopad` on the
+target machine before being committed.
+
+---
+
+## 🧬 SHA-3 Hardware Acceleration
+
+MSA-6 added SHA-3 to CPACF. This machine has it, and the kernel binds all four
+variants to hardware drivers at priority 300:
+
+```
+name: sha3-256   driver: sha3-256-s390   module: sha3_256_s390   priority: 300
+```
+
+### Why there is a pure-Go implementation at all
+
+Go 1.24 moved SHA-3 into the standard library as `crypto/sha3`. The target
+toolchain here is **go1.23.2**, where that package does not exist. The
+alternative, `golang.org/x/crypto/sha3`, would add the project's first
+third-party require to a `go.mod` that has none.
+
+So ZCrypt carries both: a dependency-free Keccak-f[1600] sponge as the reference
+implementation and fallback, and an AF_ALG path that reaches the real KIMD
+hardware through the kernel crypto API. The two are checked against each other
+before either is timed.
+
+### Measured throughput, 1 MiB buffer
+
+| Variant | Pure Go | CPACF (AF_ALG) | Speedup |
+|---------|--------:|---------------:|--------:|
+| SHA3-224 | 68.9 | 9,113 | **132×** |
+| SHA3-256 | 66.2 | 8,776 | **133×** |
+| SHA3-384 | 50.2 | 8,480 | **169×** |
+| SHA3-512 | 34.4 | 7,317 | **213×** |
+
+MB/s. The speedup grows with digest size because a bigger digest means a smaller
+sponge rate, so the software permutation runs more rounds per byte while the
+hardware instruction's cost is nearly flat.
+
+### Two details that are the whole difficulty of SHA-3 on a big-endian machine
+
+1. **The sponge absorbs and squeezes little-endian lanes**, by definition of
+   FIPS 202, even though s390x is big-endian. This is the single most common way
+   a SHA-3 implementation produces plausible-looking garbage on a mainframe. The
+   FIPS 202 vectors exist to catch anyone who "fixes" it to match the host.
+
+2. **The padding suffix is `0x06`**, not `0x01`. `0x01` is raw Keccak; SHA-3 uses
+   the two-bit domain suffix `01` followed by the first padding bit. A raw Keccak
+   implementation silently produces wrong digests that are stable and
+   self-consistent.
+
+`./zcrypt --verify` checks 11 FIPS 202 vectors across all four variants,
+including the three 1,000,000-byte cases.
+
+---
+
+## 🔏 ECC & Digital Signatures
+
+MSA-9 added `KDSA` (Compute Digital Signature Authentication). This machine
+reports MSA-13, so every curve below takes the hardware path.
+
+| Curve | Algorithm | Sign | Verify | Sign µs | Verify µs | KDSA codes |
+|-------|-----------|-----:|-------:|--------:|----------:|-----------:|
+| P-256 | ECDSA | **46,425/s** | 20,774/s | 21.5 | 48.1 | 9 / 1 |
+| P-384 | ECDSA | 26,870/s | 10,498/s | 37.2 | 95.3 | 10 / 2 |
+| P-521 | ECDSA | 18,184/s | 6,393/s | 55.0 | 156.4 | 11 / 3 |
+| Ed25519 | EdDSA | 17,985/s | 6,550/s | 55.6 | 152.7 | 32 / 33 |
+
+The P-256 sign rate independently matches `openssl speed ecdsap256` on the same
+host (62,305 sign/s), which is the cross-check that the Go path is issuing KDSA
+rather than falling back to `big.Int`.
+
+### The function codes are not symmetric
+
+ECDSA verify codes run 1..3 and sign codes run 9..11. EdDSA puts sign and verify
+adjacent at 32/33. That asymmetry is a property of the instruction, not a
+transcription error, and it is why the CPACF Query bitmap has to be consulted
+per operation rather than per curve — a machine can implement
+`KDSA-Verify-P256` without `KDSA-Sign-P256`.
+
+### The honest negative result
+
+`/proc/crypto` on this kernel registers **no** ECDSA akcipher driver:
+
+```
+kernel P-256    name="ecdsa-nist-p256"  driver=""  present=false  kdsa=true
+kernel Ed25519  name="ed25519"          driver=""  present=false  kdsa=false
+```
+
+That does not mean the numbers above are software. KDSA issues directly from
+`crypto/ecdsa` and `crypto/ed25519` in userspace; it does not need a kernel
+driver to exist. The report says both things rather than implying hardware
+acceleration for every operation.
+
+Ed25519 shows `kdsa=false` while still signing at 17,985/s, and the reason is
+visible in the raw bitmap:
+
+```
+KDSA  : f0 70 70 00 88 88 88 00 00 00 00 00 00 00 00 01
+         ^^ bits 1,2,3 set  (verify P-256/384/521)
+            ^^ byte 1 = 0x70 -> bits 9,10,11 (sign P-256/384/521)
+                     ^^ byte 4 = 0x88 -> bits 32 and 36
+```
+
+Function code **32** (Ed25519 sign) is set, but code **33** (Ed25519 verify) is
+not. Go's `internal/cpu` sets `HasEDDSA` only when both are present, so the
+Ed25519 path falls back to `edwards25519` in userspace. The number is real and
+the label is honest about which path produced it — and it is a good illustration
+of why the Query bitmap has to be consulted per operation rather than per curve.
+
+---
+
+## 🎲 PRNG & Entropy Sources
+
+MSA-5 added `PRNO`, the CPACF random number instruction. This machine has the
+facility bit (STFLE bit 57) and the kernel's `s390-trng` driver is active.
+
+### The finding worth leading with
+
+**`crypto/rand.Read` on s390x does not issue PRNO.** Go's `crypto/rand` is a
+userspace ChaCha20-based DRBG seeded once from `getrandom(2)`. The hardware TRNG
+is reachable through `/dev/hwrng` (the `s390-trng` driver) and through
+`getrandom(2)` once the kernel's CRNG is seeded from it.
+
+ZCrypt measures both separately so the DRBG figure is never presented as PRNO
+throughput:
+
+| Source | Throughput | Note |
+|--------|-----------:|------|
+| `crypto/rand` | 389 MB/s | Go ChaCha20 DRBG, not PRNO |
+| `/dev/hwrng` | 2.31 MB/s | CPACF TRNG, root-only, 32-byte driver reads |
+| `entropy_avail` | 256/256 bits | pool full; `getrandom(2)` will not block |
+
+### Randomness smoke tests
+
+A 256 KiB `crypto/rand` sample, every statistic reported as a number rather than
+a pass/fail opinion:
+
+| Statistic | Measured | Bound |
+|-----------|---------:|-------|
+| byte-histogram χ² | 249.6 | < 344 (255 dof, 0.999 quantile) |
+| bit balance | 0.500482 | 0.49 .. 0.51 |
+| Shannon entropy | 7.9993 bits/byte | ≥ 7.9 |
+| serial correlation | −0.00099 | −0.1 .. 0.1 |
+| longest identical-byte run | 3 | ≤ 16 |
+| duplicate 16-byte blocks | 0 / 16,384 | 0 |
+
+These are smoke tests that catch gross faults — a stuck bit, a constant, a
+counter that only increments, a source that returns the same block twice — and
+nothing more. Passing them is not evidence of cryptographic quality; failing them
+is solid evidence of a problem. The test suite includes a negative control: five
+obviously broken sources, each of which must be flagged with the specific
+statistic that catches it.
+
+ZCrypt cannot issue `PRNO` directly: the Go assembler has no mnemonic for it, and
+unlike KDSA or KIMD there is no kernel crypto API algorithm that maps onto it in a
+way userspace can drive. The STFLE bit is therefore the authoritative statement
+that the instruction exists, and that is what the report cites.
+
+---
+
+## 📐 Buffer Size Performance Sweep
+
+Three sample points cannot show where throughput turns over. `./zcrypt --sweep`
+measures a nine-point ladder from 64 B to 4 MiB and reports the knee — the
+smallest buffer that reaches 90% of peak.
+
+| Algorithm | 64 B | 1 KiB | 4 KiB | 64 KiB | 4 MiB | Peak | Knee |
+|-----------|-----:|------:|------:|-------:|------:|-----:|-----:|
+| AES-256-GCM | 702 | 7,066 | 13,854 | **14,249** | 13,523 | 14,249 @ 64 KiB | **4 KiB** |
+| SHA-256 | 341 | 2,602 | 3,701 | 4,197 | 4,196 | 4,239 @ 256 KiB | **16 KiB** |
+| SHA3-256 (pure Go) | 30 | 65 | 67 | **70** | 70 | 70 @ 64 KiB | **256 B** |
+
+MB/s. Full curves, per-point iteration counts and method notes in
+[`docs/benchmarks/buffer-size-sweep.md`](./docs/benchmarks/buffer-size-sweep.md).
+
+### Reading the knees
+
+- **AES-GCM turns over at 4 KiB.** Below it, a single KMA instruction is issuing
+  on a buffer shorter than the pipeline is tuned for, and the fixed per-call cost
+  has not been amortised. Above it the curve is flat within noise to 4 MiB. An
+  application sealing 16 KiB TLS records is already at 97% of peak; one sealing
+  1 KiB messages is leaving 2× on the table purely to per-call overhead.
+- **SHA-256 needs 16 KiB**, four times more than AES. A hash is inherently
+  serial, so there is no parallelism to hide the setup behind.
+- **Pure-Go SHA3-256 turns over at 256 B**, far earlier, because its cost is
+  almost entirely arithmetic — there is no instruction dispatch to amortise. The
+  whole curve sits between 30 and 70 MB/s, which is the correct shape for a
+  software permutation and why the hardware path's 133× matters.
+
+No crossovers appear within the ladder: the ordering of these three primitives is
+fixed by which CPACF instruction backs each, not by buffer size.
+
+---
+
+## 📉 Performance Regression Detection
+
+A benchmark that is only ever run by hand is a benchmark that silently rots.
+`zcrypt` makes the comparison mechanical.
+
+```bash
+# Capture a baseline (15 metrics, machine fingerprint included)
+./zcrypt --write-baseline docs/benchmarks/baseline.json
+
+# Compare against it; exit 1 on any regression beyond the tolerance
+./zcrypt --baseline-check docs/benchmarks/baseline.json --tolerance 20
+
+# Or use the wrapper, which decides the exit status and formats a summary
+./scripts/check-regression.sh --tolerance 20
+```
+
+The comparability rules are the interesting part. CI runners are amd64 shared VMs
+and the baseline is s390x on bare metal, so comparing them directly would report
+a 15× "regression" on every push. Architecture and MSA level are therefore hard
+requirements for comparison; machine type and Go version are reported as context
+but do not block. A non-comparable machine reports every row as `skipped` with
+the reason, never as a regression:
+
+```
+baseline: 0 regressed, 0 improved, 0 skipped of 15 metrics (tolerance 20%, worst -5.2%)
+```
+
+Fifteen metrics: AES-GCM/CBC/CTR encrypt and AES-GCM decrypt at 1 MiB, SHA-256
+and SHA-512, pure-Go SHA3-256, and sign/verify rates for all four curves.
+Small-buffer figures are deliberately excluded because they are the noisiest rows
+and would make the gate fire on scheduling jitter.
+
+Baselines are written atomically (temp file + rename), so an interrupted run
+cannot leave a half-written file that the next comparison reads as corrupt.
+
+---
+
+## ⏱️ Continuous Monitoring Mode
+
+`--watch` re-benchmarks on a timer and republishes metrics, turning a one-shot
+report into something that runs unattended.
+
+```bash
+# Exporter whose collector self-refreshes every 60 seconds
+./zcrypt --serve :9110 --watch 60s
+
+# Console monitor: one JSON line per tick
+./zcrypt --watch 60s
+
+# Watch with regression detection on every tick
+./zcrypt --watch 60s --baseline docs/benchmarks/baseline.json
+```
+
+```
+{"seq":0,"timestamp":"2026-11-19T06:58:53Z","elapsed_ms":18,
+ "aes256gcm_encrypt_mbps":12618.65,"sha256_mbps":4361.14,
+ "nist_vectors_ok":true,"max_msa_level":12}
+```
+
+The design point: the watch loop does not call the exporter's HTTP handler. It
+drives the same `Collector` the exporter uses, and the exporter serves whatever
+that collector last produced. So a slow benchmark cannot block a Prometheus
+scrape, and a scrape cannot trigger an unscheduled benchmark.
+
+Each tick checks NIST vectors *before* reporting throughput, because a monitor
+that reports numbers for a broken primitive is worse than one that reports
+nothing. A tick takes about 18 ms at scale 1.
+
+---
+
 ## 📄 License
 
 Licensed under the [MIT License](./LICENSE). Contributions and PRs for IBM Z and LinuxONE optimizations are warmly welcomed!
