@@ -39,6 +39,12 @@ func main() {
 	verifyOnly := flag.Bool("verify", false, "Run NIST test vector verification only")
 	iterations := flag.Int("n", 200, "Benchmark iterations per block size")
 	noAES := flag.Bool("no-aes", false, "Skip the AES-256-GCM throughput sweep")
+	sweep := flag.Bool("sweep", false, "Run the buffer-size sweep and print the curves")
+	sweepScale := flag.Int("sweep-scale", 1, "Iteration scale for the buffer-size sweep")
+	writeBaseline := flag.String("write-baseline", "", "Measure and write a performance baseline to this path")
+	baselineCheck := flag.String("baseline-check", "", "Compare current throughput against the baseline at this path")
+	tolerance := flag.Float64("tolerance", 20, "Regression tolerance percentage for --baseline-check")
+	watchInterval := flag.String("watch", "", "Re-benchmark every interval and refresh metrics (e.g. 60s); use with --serve")
 	flag.Parse()
 
 	// 1. Detect hardware, then refine with live CPACF Query results.
@@ -49,7 +55,32 @@ func main() {
 	// 2. Read the kernel crypto API dispatch table.
 	kernel := cpacf.DetectKernelCrypto()
 
-	// 3. Verify NIST compliance.
+	// 3. Baseline writing and checking are standalone modes: they measure and
+	// exit, so they run before the report path builds up any state.
+	if *writeBaseline != "" {
+		runWriteBaseline(*writeBaseline, caps)
+		return
+	}
+	if *baselineCheck != "" {
+		runBaselineCheck(*baselineCheck, caps, *tolerance)
+		return
+	}
+
+	// 4. The sweep is also standalone: it prints its own tables.
+	if *sweep {
+		runSweep(*sweepScale)
+		return
+	}
+
+	// 5. Watch mode without --serve: a console monitor emitting one JSON line
+	// per tick. With --serve the same loop runs inside the exporter, so it is
+	// handled in runExporter instead.
+	if *watchInterval != "" {
+		runWatchConsole(*watchInterval, *iterations/200, *baselineCheck, *tolerance)
+		return
+	}
+
+	// 5. Verify NIST compliance.
 	if err := cipher.VerifyNISTVectors(); err != nil {
 		fmt.Fprintf(os.Stderr, "FATAL: %v\n", err)
 		os.Exit(1)
@@ -59,11 +90,25 @@ func main() {
 		fmt.Fprintf(os.Stderr, "FATAL: AES-256-GCM NIST vector mismatch: %v\n", aesErr)
 		os.Exit(1)
 	}
+	modeVectorsPassed, modeErr := cipher.VerifyAESModeVectors()
+	if modeErr != nil {
+		fmt.Fprintf(os.Stderr, "FATAL: SP 800-38A vector mismatch: %v\n", modeErr)
+		os.Exit(1)
+	}
+	sha3Passed, sha3Err := cipher.VerifySHA3Vectors()
+	if sha3Err != nil {
+		fmt.Fprintf(os.Stderr, "FATAL: SHA-3 NIST vector mismatch: %v\n", sha3Err)
+		os.Exit(1)
+	}
 
 	if *verifyOnly {
 		fmt.Printf("NIST SHA-256 and SHA-512 verification passed on %s.\n", caps.Endianness)
 		fmt.Printf("NIST AES-256-GCM verification passed: %d/%d vectors bit-exact.\n",
 			vectorsPassed, len(cipher.NISTGCMVectors))
+		fmt.Printf("NIST SP 800-38A verification passed: %d/%d vectors bit-exact (ECB/CBC/CTR).\n",
+			modeVectorsPassed, len(cipher.NISTSP80038AVectors))
+		fmt.Printf("NIST SHA-3 verification passed: %d/%d vectors bit-exact (224/256/384/512).\n",
+			sha3Passed, len(cipher.NISTSHA3Vectors))
 		return
 	}
 
@@ -72,16 +117,21 @@ func main() {
 	sha256_1M, sha512_1M := cipher.BenchmarkDigest(1024*1024, *iterations/4+1)
 
 	// 5. AES-256-GCM throughput.
+	//
+	// The iteration scale is derived once here and reused by every later
+	// measurement, so all of them run for a comparable wall-clock time regardless
+	// of which sections are enabled.
+	scale := *iterations / 200
+	if scale < 1 {
+		scale = 1
+	}
+
 	var aesResults []cipher.AESGCMResult
 	if !*noAES {
 		key, err := cipher.RandomKey()
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "FATAL: %v\n", err)
 			os.Exit(1)
-		}
-		scale := *iterations / 200
-		if scale < 1 {
-			scale = 1
 		}
 		results, err := cipher.AESGCMBenchmarkSuite(key, scale)
 		if err != nil {
@@ -91,21 +141,44 @@ func main() {
 		aesResults = results
 	}
 
+	// 6. AES mode comparison, SHA-3, ECC and PRNG.
+	modeRows := cipher.AESModeComparisonSuite(256, scale)
+	sha3Rows := cipher.SHA3Suite(1024*1024, *iterations/10+1)
+	sha3Kernel := cipher.SHA3KernelDrivers()
+	signRows := cipher.SignSuite(*iterations / 4)
+	eccKernel := cipher.ECCKernelReport()
+	prng, prngErr := cipher.RunPRNGSuite(caps, 64*1024, *iterations/2)
+	prngInfo := cipher.ReadPRNGInfo(caps)
+
 	if *jsonOutput {
 		out := map[string]interface{}{
-			"capabilities":            caps,
-			"cpacf_query":             query,
-			"kernel_crypto":           kernel,
-			"aes_impl":                cipher.DetectAESImplementation(),
-			"nist_verified":           true,
-			"nist_gcm_vectors_passed": vectorsPassed,
+			"capabilities":             caps,
+			"cpacf_query":              query,
+			"kernel_crypto":            kernel,
+			"aes_impl":                 cipher.DetectAESImplementation(),
+			"nist_verified":            true,
+			"nist_gcm_vectors_passed":  vectorsPassed,
+			"nist_mode_vectors_passed": modeVectorsPassed,
+			"nist_sha3_vectors_passed": sha3Passed,
 			"throughput_mbps": map[string]interface{}{
 				"sha256_64k": sha256_64K,
 				"sha512_64k": sha512_64K,
 				"sha256_1m":  sha256_1M,
 				"sha512_1m":  sha512_1M,
 			},
-			"aes256gcm": aesResults,
+			"aes256gcm":      aesResults,
+			"aes_modes":      modeRows,
+			"aes_mode_table": cipher.AESModeTable,
+			"sha3":           sha3Rows,
+			"sha3_kernel":    sha3Kernel,
+			"signatures":     signRows,
+			"ecc_kernel":     eccKernel,
+			"curve_table":    cipher.CurveTable,
+			"prng":           prng,
+			"prng_info":      prngInfo,
+		}
+		if prngErr != nil {
+			out["prng_error"] = prngErr.Error()
 		}
 		data, err := json.MarshalIndent(out, "", "  ")
 		if err != nil {
@@ -117,6 +190,10 @@ func main() {
 	}
 
 	printReport(caps, query, kernel, aesResults, sha256_64K, sha512_64K, sha256_1M, sha512_1M, vectorsPassed)
+	printModeSection(modeRows)
+	printSHA3Section(sha3Rows, sha3Kernel)
+	printECCSection(signRows, eccKernel)
+	printPRNGSection(prng, prngInfo, prngErr)
 }
 
 func printReport(
@@ -245,6 +322,9 @@ func runExporter(args []string) {
 	addr := fs.String("serve", ":9110", "HTTP listen address for the metrics endpoint")
 	scale := fs.Int("scale", 1, "Benchmark iteration scale for the exporter")
 	interval := fs.Duration("benchmark-interval", 0, "How long benchmark results stay cached (0 = default 5m)")
+	watch := fs.String("watch", "", "Re-benchmark every interval (e.g. 60s) and refresh the metrics")
+	baselinePath := fs.String("baseline", "", "Baseline to compare each watch tick against")
+	tolerance := fs.Float64("tolerance", 20, "Regression tolerance percentage for --baseline")
 	_ = fs.Parse(args)
 
 	srv := exporter.NewServer(*addr)
@@ -257,7 +337,71 @@ func runExporter(args []string) {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	// With --watch, a background loop refreshes the collector's cache on a
+	// timer. The HTTP handler keeps serving whatever the collector last
+	// produced, so a slow benchmark never blocks a scrape and a scrape never
+	// triggers an unscheduled benchmark.
+	if *watch != "" {
+		d, err := parseWatchInterval(*watch)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "FATAL: %v\n", err)
+			os.Exit(2)
+		}
+		w := &watcher{
+			interval:  d,
+			scale:     *scale,
+			collector: srv.Collector,
+			tolerance: *tolerance,
+			out:       os.Stderr,
+		}
+		if *baselinePath != "" {
+			b, err := cipher.ReadBaseline(*baselinePath)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "FATAL: %v\n", err)
+				os.Exit(2)
+			}
+			w.baseline = &b
+		}
+		go func() {
+			if err := w.run(ctx); err != nil {
+				fmt.Fprintf(os.Stderr, "watch loop stopped: %v\n", err)
+			}
+		}()
+		if srv.Logger != nil {
+			srv.Logger.Printf("watch mode: re-benchmarking every %s", d)
+		}
+	}
+
 	if err := srv.Run(ctx); err != nil {
+		fmt.Fprintf(os.Stderr, "FATAL: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+// runWatchConsole implements `zcrypt --watch <interval>` without --serve: one
+// JSON line per tick on stdout, which is what a shell monitor or a log shipper
+// wants.
+func runWatchConsole(interval string, scale int, baselinePath string, tolerance float64) {
+	d, err := parseWatchInterval(interval)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "FATAL: %v\n", err)
+		os.Exit(2)
+	}
+	w := &watcher{interval: d, scale: scale, tolerance: tolerance, out: os.Stdout}
+	if baselinePath != "" {
+		b, err := cipher.ReadBaseline(baselinePath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "FATAL: %v\n", err)
+			os.Exit(2)
+		}
+		w.baseline = &b
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	fmt.Fprintf(os.Stderr, "watching: measuring every %s, Ctrl-C to stop\n", d)
+	if err := w.run(ctx); err != nil {
 		fmt.Fprintf(os.Stderr, "FATAL: %v\n", err)
 		os.Exit(1)
 	}
