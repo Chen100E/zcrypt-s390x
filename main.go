@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -16,6 +17,9 @@ import (
 	"github.com/Chen100E/zcrypt-s390x/pkg/cpacf"
 	"github.com/Chen100E/zcrypt-s390x/pkg/exporter"
 )
+
+// version is injected at build time via -ldflags "-X main.version=..."
+var version = "dev"
 
 func main() {
 	// Subcommand dispatch: `zcrypt export` runs the Prometheus exporter, bare
@@ -46,7 +50,13 @@ func main() {
 	tolerance := flag.Float64("tolerance", 20, "Regression tolerance percentage for --baseline-check and --watch")
 	watchInterval := flag.String("watch", "", "Re-benchmark every interval and refresh metrics (e.g. 60s); use with --serve")
 	watchBaseline := flag.String("baseline", "", "Baseline path for --watch to compare each tick against")
+	showVersion := flag.Bool("version", false, "Print version information and exit")
 	flag.Parse()
+
+	if *showVersion {
+		fmt.Printf("zcrypt %s (%s/%s, %s)\n", version, runtime.GOOS, runtime.GOARCH, runtime.Version())
+		return
+	}
 
 	// 1. Detect hardware, then refine with live CPACF Query results.
 	caps := cpacf.Detect()
