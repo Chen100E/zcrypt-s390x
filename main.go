@@ -43,8 +43,9 @@ func main() {
 	sweepScale := flag.Int("sweep-scale", 1, "Iteration scale for the buffer-size sweep")
 	writeBaseline := flag.String("write-baseline", "", "Measure and write a performance baseline to this path")
 	baselineCheck := flag.String("baseline-check", "", "Compare current throughput against the baseline at this path")
-	tolerance := flag.Float64("tolerance", 20, "Regression tolerance percentage for --baseline-check")
+	tolerance := flag.Float64("tolerance", 20, "Regression tolerance percentage for --baseline-check and --watch")
 	watchInterval := flag.String("watch", "", "Re-benchmark every interval and refresh metrics (e.g. 60s); use with --serve")
+	watchBaseline := flag.String("baseline", "", "Baseline path for --watch to compare each tick against")
 	flag.Parse()
 
 	// 1. Detect hardware, then refine with live CPACF Query results.
@@ -76,7 +77,7 @@ func main() {
 	// per tick. With --serve the same loop runs inside the exporter, so it is
 	// handled in runExporter instead.
 	if *watchInterval != "" {
-		runWatchConsole(*watchInterval, *iterations/200, *baselineCheck, *tolerance)
+		runWatchConsole(*watchInterval, *iterations/200, *watchBaseline, *tolerance)
 		return
 	}
 
