@@ -41,8 +41,20 @@ const (
 
 	FuncKDSAVerifyP256 = 1  // KDSA-ECDSA-Verify-P256 (MSA-9)
 	FuncKDSAVerifyP384 = 2  // KDSA-ECDSA-Verify-P384 (MSA-9)
+	FuncKDSAVerifyP521 = 3  // KDSA-ECDSA-Verify-P521 (MSA-9)
 	FuncKDSASignP256   = 9  // KDSA-ECDSA-Sign-P256 (MSA-9)
 	FuncKDSASignP384   = 10 // KDSA-ECDSA-Sign-P384 (MSA-9)
+	FuncKDSASignP521   = 11 // KDSA-ECDSA-Sign-P521 (MSA-9)
+
+	// EdDSA codes. Unlike ECDSA, sign and verify are adjacent: 32 signs and 33
+	// verifies Ed25519, 34/35 do the same for Ed448. The asymmetry with the
+	// ECDSA layout (verify 1..3, sign 9..11) is a property of the instruction,
+	// not a transcription error, which is why the query bitmap has to be
+	// consulted per operation rather than per curve.
+	FuncKDSASignEd25519   = 32 // KDSA-EdDSA-Sign-Ed25519 (MSA-9)
+	FuncKDSAVerifyEd25519 = 33 // KDSA-EdDSA-Verify-Ed25519 (MSA-9)
+	FuncKDSASignEd448     = 34 // KDSA-EdDSA-Sign-Ed448 (MSA-9)
+	FuncKDSAVerifyEd448   = 35 // KDSA-EdDSA-Verify-Ed448 (MSA-9)
 
 	FuncQAI = 127 // Query Authentication Information (MSA-13)
 )
