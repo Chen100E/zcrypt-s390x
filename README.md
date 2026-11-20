@@ -1,6 +1,6 @@
 # ZCrypt-s390x 🔐
 
-[![Multi-Arch Crypto CI](https://img.shields.io/badge/CI-Multi--Arch%20(s390x%20%2F%20amd64%20%2F%20arm64)-brightgreen.svg)]()
+[![Multi-Arch Crypto CI](https://github.com/Chen100E/zcrypt-s390x/actions/workflows/ci.yml/badge.svg)](Chen100E/zcrypt-s390x/actions/workflows/ci.yml)
 [![Go Report Card](https://img.shields.io/badge/Go-1.22+-blue.svg)](https://golang.org)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 [![Architecture](https://img.shields.io/badge/Architecture-IBM%20s390x%20(Big--Endian)-purple.svg)]()
