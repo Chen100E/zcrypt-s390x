@@ -199,6 +199,67 @@ func printSHAKESection(rows []cipher.SHAKEDigestResult, kernel []cipher.SHAKEKer
 	fmt.Println("bit-exact against FIPS 202 vectors including a squeeze longer than the rate.")
 }
 
+// printGHASHSection renders the standalone GHASH comparison.
+//
+// GHASH is the GF(2^128) universal hash inside GCM. It is reported separately
+// from AES-256-GCM because GCM's KMA instruction fuses the AES rounds and the
+// authentication into one pass, so the GCM throughput number says nothing about
+// what the raw GHASH instruction costs on its own. The two columns here are the
+// reference implementation and the kernel's ghash driver reached through
+// AF_ALG, which on s390x is ghash-s390 over KIMD function code 65.
+func printGHASHSection(rows []cipher.GHASHResult, kernel cipher.GHASHHardwareInfo) {
+	if len(rows) == 0 {
+		return
+	}
+	fmt.Println(sectionRule)
+	fmt.Println("GHASH (GF(2^128) universal hash, NIST SP 800-38D)")
+	fmt.Println(sectionRule)
+
+	var soft, hard cipher.GHASHResult
+	for _, r := range rows {
+		switch r.Backend {
+		case "pure-go":
+			soft = r
+		case "af_alg":
+			hard = r
+		}
+	}
+
+	fmt.Printf("%-10s %12s %14s  %s\n", "BACKEND", "BUFFER", "MB/s", "STATUS")
+	row := func(r cipher.GHASHResult) {
+		if r.Error != "" {
+			fmt.Printf("%-10s %12s %14s  %s\n", r.Backend, humanSize(r.BlockSize), "-", "unavailable: "+r.Error)
+			return
+		}
+		fmt.Printf("%-10s %12s %14.2f  %s\n", r.Backend, humanSize(r.BlockSize), r.MBps, "ok")
+	}
+	row(soft)
+	row(hard)
+	if soft.Error == "" && hard.Error == "" && soft.MBps > 0 {
+		fmt.Printf("\nhardware speedup over the reference implementation: %.0fx\n", hard.MBps/soft.MBps)
+	}
+
+	fmt.Println()
+	fmt.Println("Kernel dispatch for GHASH:")
+	switch {
+	case kernel.KernelDriver == "":
+		fmt.Printf("  no driver registered (%s)\n", kernel.Error)
+	case kernel.Hardware:
+		fmt.Printf("  ghash  driver %-16s priority %3d  HARDWARE (CPACF KIMD-GHASH)  AF_ALG %v\n",
+			kernel.KernelDriver, kernel.KernelPriority, kernel.AFALGAvailable)
+	default:
+		fmt.Printf("  ghash  driver %-16s priority %3d  software  AF_ALG %v\n",
+			kernel.KernelDriver, kernel.KernelPriority, kernel.AFALGAvailable)
+	}
+	fmt.Println()
+	fmt.Println("The reference implementation is a bit-at-a-time shift-and-xor over the")
+	fmt.Println("128-bit block: obviously correct, and deliberately not fast. It is the")
+	fmt.Println("oracle the hardware path is checked against, on every message length from")
+	fmt.Println("zero bytes up, so the zero-padding of a trailing partial block agrees by")
+	fmt.Println("measurement rather than by assumption. The standalone vectors and the")
+	fmt.Println("non-96-bit-IV GCM vectors are verified before this section is printed.")
+}
+
 // printECCSection renders the signature benchmarks.
 func printECCSection(rows []cipher.SignatureResult, kernel []cipher.ECCKernelInfo) {
 	if len(rows) == 0 {

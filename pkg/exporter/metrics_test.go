@@ -56,7 +56,12 @@ func sampleSnapshot() Snapshot {
 		},
 		SHA256MBps: 4339.68,
 		SHA512MBps: 6793.86,
-		VectorsOK:  true,
+		// Two GHASH paths on the same buffer size. The hardware figure is what
+		// ghash-s390 reports; the reference implementation is three orders of
+		// magnitude slower, which is the whole argument for the CPACF path.
+		GHASHSoftwareMBps: 6.62,
+		GHASHHardwareMBps: 477.94,
+		VectorsOK:         true,
 		AESImpl: cipher.AESImplementation{
 			Arch:         "s390x",
 			AssemblyPath: true,
@@ -134,6 +139,7 @@ func TestRenderContainsExpectedMetrics(t *testing.T) {
 		"zcrypt_kernel_crypto_algorithms",
 		"zcrypt_sha256_throughput_mbps",
 		"zcrypt_sha512_throughput_mbps",
+		"zcrypt_ghash_throughput_mbps",
 		"zcrypt_aes256gcm_encrypt_mbps",
 		"zcrypt_aes256gcm_decrypt_mbps",
 		"zcrypt_aes256gcm_throughput_mbps",
@@ -163,6 +169,8 @@ func TestRenderValues(t *testing.T) {
 		`zcrypt_aes256gcm_decrypt_mbps{block_size="1048576"} 14150.94`,
 		`zcrypt_sha256_throughput_mbps 4339.68`,
 		`zcrypt_sha512_throughput_mbps 6793.86`,
+		`zcrypt_ghash_throughput_mbps{backend="pure-go"} 6.62`,
+		`zcrypt_ghash_throughput_mbps{backend="af_alg"} 477.94`,
 	}
 	for _, want := range checks {
 		if !strings.Contains(out, want) {

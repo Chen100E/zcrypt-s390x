@@ -121,6 +121,21 @@ func main() {
 		fmt.Fprintf(os.Stderr, "FATAL: SHAKE NIST vector mismatch: %v\n", shakeErr)
 		os.Exit(1)
 	}
+	ghashPassed, ghashErr := cipher.VerifyGHASHVectors()
+	if ghashErr != nil {
+		fmt.Fprintf(os.Stderr, "FATAL: GHASH NIST vector mismatch: %v\n", ghashErr)
+		os.Exit(1)
+	}
+	ghashIVPassed, ghashIVErr := cipher.VerifyGCMNonStdIVVectors()
+	if ghashIVErr != nil {
+		fmt.Fprintf(os.Stderr, "FATAL: non-96-bit-IV GCM vector mismatch: %v\n", ghashIVErr)
+		os.Exit(1)
+	}
+	stdIVPassed, stdIVErr := cipher.VerifyGCMStdIVVectorsWithGCMSeal()
+	if stdIVErr != nil {
+		fmt.Fprintf(os.Stderr, "FATAL: 96-bit-IV GCM regression through GCMSealWithIV: %v\n", stdIVErr)
+		os.Exit(1)
+	}
 
 	if *verifyOnly {
 		fmt.Printf("NIST SHA-256 and SHA-512 verification passed on %s.\n", caps.Endianness)
@@ -134,6 +149,12 @@ func main() {
 			xtsPassed, len(cipher.XTSVectors))
 		fmt.Printf("NIST SHAKE verification passed: %d/%d vectors bit-exact (SHAKE128/256, incl. 200-byte squeeze).\n",
 			shakePassed, len(cipher.NISTSHAKEVectors))
+		fmt.Printf("SP 800-38D GHASH verification passed: %d/%d standalone vectors bit-exact.\n",
+			ghashPassed, len(cipher.NISTGHASHVectors))
+		fmt.Printf("SP 800-38D GCM non-96-bit-IV verification passed: %d/%d vectors bit-exact (J0 via GHASH).\n",
+			ghashIVPassed, len(cipher.NISTGCMNonStdIVVectors))
+		fmt.Printf("SP 800-38D GCM 96-bit-IV regression passed: %d/%d vectors bit-exact through GCMSealWithIV.\n",
+			stdIVPassed, len(cipher.NISTGCMVectors))
 		return
 	}
 
@@ -179,17 +200,41 @@ func main() {
 	prng, prngErr := cipher.RunPRNGSuite(caps, 64*1024, *iterations/2)
 	prngInfo := cipher.ReadPRNGInfo(caps)
 
+	// GHASH is measured on both paths so the report can show what the CPACF
+	// KIMD-GHASH instruction buys over the reference implementation. The
+	// hardware row carries an Error string (and no throughput) when ghash-s390
+	// is not reachable, which is the normal case on a host without CPACF.
+	ghashRows := make([]cipher.GHASHResult, 0, 2)
+	if ghashKey, err := cipher.RandomKey(); err == nil {
+		if h, err := cipher.GCMHashSubkey(ghashKey); err == nil {
+			soft, serr := cipher.GHASHSoftwareBenchmark(h, 1024*1024, *iterations/20+1)
+			if serr != nil {
+				soft.Error = serr.Error()
+			}
+			hard, herr := cipher.GHASHHardwareBenchmark(h, 1024*1024, *iterations)
+			if herr != nil {
+				hard.Error = herr.Error()
+			}
+			ghashRows = append(ghashRows, soft, hard)
+		}
+	}
+	ghashKernel := cipher.GHASHKernelInfo()
+
 	if *jsonOutput {
 		out := map[string]interface{}{
-			"capabilities":             caps,
-			"cpacf_query":              query,
-			"kernel_crypto":            kernel,
-			"aes_impl":                 cipher.DetectAESImplementation(),
-			"nist_verified":            true,
-			"nist_gcm_vectors_passed":  vectorsPassed,
-			"nist_mode_vectors_passed": modeVectorsPassed,
-			"nist_sha3_vectors_passed": sha3Passed,
-			"nist_xts_vectors_passed":  xtsPassed,
+			"capabilities":                      caps,
+			"cpacf_query":                       query,
+			"kernel_crypto":                     kernel,
+			"aes_impl":                          cipher.DetectAESImplementation(),
+			"nist_verified":                     true,
+			"nist_gcm_vectors_passed":           vectorsPassed,
+			"nist_mode_vectors_passed":          modeVectorsPassed,
+			"nist_sha3_vectors_passed":          sha3Passed,
+			"nist_xts_vectors_passed":           xtsPassed,
+			"nist_shake_vectors_passed":         shakePassed,
+			"nist_ghash_vectors_passed":         ghashPassed,
+			"nist_gcm_iv_vectors_passed":        ghashIVPassed,
+			"nist_gcm_std_iv_regression_passed": stdIVPassed,
 			"throughput_mbps": map[string]interface{}{
 				"sha256_64k": sha256_64K,
 				"sha512_64k": sha512_64K,
@@ -205,6 +250,8 @@ func main() {
 			"sha3_kernel":    sha3Kernel,
 			"shake":          shakeRows,
 			"shake_kernel":   shakeKernel,
+			"ghash":          ghashRows,
+			"ghash_kernel":   ghashKernel,
 			"signatures":     signRows,
 			"ecc_kernel":     eccKernel,
 			"curve_table":    cipher.CurveTable,
@@ -228,6 +275,7 @@ func main() {
 	printXTSSection(xtsRows, xtsPassed, len(cipher.XTSVectors), xtsKernel)
 	printSHA3Section(sha3Rows, sha3Kernel)
 	printSHAKESection(shakeRows, shakeKernel)
+	printGHASHSection(ghashRows, ghashKernel)
 	printECCSection(signRows, eccKernel)
 	printPRNGSection(prng, prngInfo, prngErr)
 }

@@ -35,10 +35,17 @@ type Snapshot struct {
 	AES        []cipher.AESGCMResult
 	SHA256MBps float64
 	SHA512MBps float64
-	VectorsOK  bool
-	VectorErr  string
-	AESImpl    cipher.AESImplementation
-	CollectErr string
+	// GHASHSoftwareMBps and GHASHHardwareMBps are the two GHASH throughputs on
+	// the same buffer size. The hardware figure is zero when the kernel's ghash
+	// driver is not reachable through AF_ALG, which is the normal case on a host
+	// without CPACF; a zero is reported rather than omitted so that a dashboard
+	// can alert on the hardware path disappearing.
+	GHASHSoftwareMBps float64
+	GHASHHardwareMBps float64
+	VectorsOK         bool
+	VectorErr         string
+	AESImpl           cipher.AESImplementation
+	CollectErr        string
 }
 
 // Collector produces Snapshots. It is a struct rather than a bare function so
@@ -85,6 +92,12 @@ func (c *Collector) Collect() Snapshot {
 	if _, err := cipher.VerifyAESGCMVectors(); err != nil {
 		snap.VectorsOK = false
 		snap.VectorErr = err.Error()
+	} else if _, err := cipher.VerifyGCMNonStdIVVectors(); err != nil {
+		snap.VectorsOK = false
+		snap.VectorErr = err.Error()
+	} else if _, err := cipher.VerifyGHASHVectors(); err != nil {
+		snap.VectorsOK = false
+		snap.VectorErr = err.Error()
 	} else if err := cipher.VerifyNISTVectors(); err != nil {
 		snap.VectorsOK = false
 		snap.VectorErr = err.Error()
@@ -96,6 +109,8 @@ func (c *Collector) Collect() Snapshot {
 		snap.AES = c.cached.AES
 		snap.SHA256MBps = c.cached.SHA256MBps
 		snap.SHA512MBps = c.cached.SHA512MBps
+		snap.GHASHSoftwareMBps = c.cached.GHASHSoftwareMBps
+		snap.GHASHHardwareMBps = c.cached.GHASHHardwareMBps
 		return snap
 	}
 
@@ -117,6 +132,19 @@ func (c *Collector) Collect() Snapshot {
 	sha256MBps, sha512MBps := cipher.BenchmarkDigest(1024*1024, 20*scale)
 	snap.SHA256MBps = sha256MBps
 	snap.SHA512MBps = sha512MBps
+
+	// GHASH is measured on both paths. The reference implementation runs at a
+	// few MB/s, so it is measured on small buffers with few iterations to keep
+	// a scrape cheap; the hardware figure uses the same buffer size and count so
+	// the two are directly comparable.
+	if h, err := cipher.GCMHashSubkey(key); err == nil {
+		if soft, err := cipher.GHASHSoftwareBenchmark(h, 1024, 5*scale); err == nil {
+			snap.GHASHSoftwareMBps = soft.MBps
+		}
+		if hard, err := cipher.GHASHHardwareBenchmark(h, 1024, 200*scale); err == nil {
+			snap.GHASHHardwareMBps = hard.MBps
+		}
+	}
 
 	c.cached = &snap
 	c.lastBench = now
@@ -246,6 +274,14 @@ func Render(s Snapshot) string {
 
 	writeHelp("zcrypt_sha512_throughput_mbps", "SHA-512 throughput in MB/s on 1 MiB buffers.", "gauge")
 	fmt.Fprintf(&b, "zcrypt_sha512_throughput_mbps %.2f\n", s.SHA512MBps)
+
+	// GHASH is reported for both paths on the same buffer size, so the ratio is
+	// the hardware's contribution to authentication. A zero hardware figure
+	// means the kernel's ghash driver is not reachable through AF_ALG.
+	writeHelp("zcrypt_ghash_throughput_mbps",
+		"GHASH throughput in MB/s on 1 KiB messages, by implementation path.", "gauge")
+	fmt.Fprintf(&b, "zcrypt_ghash_throughput_mbps{backend=\"pure-go\"} %.2f\n", s.GHASHSoftwareMBps)
+	fmt.Fprintf(&b, "zcrypt_ghash_throughput_mbps{backend=\"af_alg\"} %.2f\n", s.GHASHHardwareMBps)
 
 	writeHelp("zcrypt_aes256gcm_encrypt_mbps",
 		"AES-256-GCM seal throughput in MB/s, labelled by buffer size.", "gauge")
