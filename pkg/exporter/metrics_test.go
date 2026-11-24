@@ -31,6 +31,7 @@ func sampleSnapshot() Snapshot {
 			HasAESGCM:      true,
 			HasGHASH:       true,
 			HasSHA3:        true,
+			HasSHAKE:       true,
 			HasECC:         true,
 			HasPRNO:        true,
 			HasWrappedK:    true,
@@ -225,6 +226,64 @@ func TestRenderNoQueryAndNoKernel(t *testing.T) {
 	}
 	if !strings.Contains(out, "zcrypt_max_msa_level 0") {
 		t.Error("max_msa_level should be 0 without CPACF")
+	}
+}
+
+// TestRenderCapabilityFlags covers the per-feature capability gauge, including
+// the SHAKE flag. A feature that is present but not exported is invisible to a
+// dashboard, which is how the SHAKE detection gap went unnoticed: the hardware
+// had it, the exporter never mentioned it.
+func TestRenderCapabilityFlags(t *testing.T) {
+	snap := sampleSnapshot()
+	snap.Caps.HasSHAKE = true
+	out := Render(snap)
+
+	for _, want := range []string{
+		`zcrypt_capability{feature="sha3"} 1`,
+		`zcrypt_capability{feature="shake"} 1`,
+		`zcrypt_capability{feature="aes"} 1`,
+		`zcrypt_capability{feature="nnpa"} 1`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing capability sample %q", want)
+		}
+	}
+
+	// With the flag clear the gauge must read 0, not disappear: a dashboard
+	// needs the series to exist in order to alert on its absence.
+	snap.Caps.HasSHAKE = false
+	out = Render(snap)
+	if !strings.Contains(out, `zcrypt_capability{feature="shake"} 0`) {
+		t.Error("shake capability must be exported as 0 when the flag is clear")
+	}
+}
+
+// TestRenderShakeQueryRows checks the KIMD SHAKE function codes appear as
+// labelled query rows, so the hardware evidence for the capability gauge is
+// visible in the exposition rather than only in the boolean.
+func TestRenderShakeQueryRows(t *testing.T) {
+	snap := sampleSnapshot()
+	var kimd cpacf.FunctionBitmap
+	for _, fc := range []uint{
+		cpacf.FuncKIMDSHA3_256, cpacf.FuncKIMDSHAKE128, cpacf.FuncKIMDSHAKE256,
+	} {
+		kimd[fc/8] |= 0x80 >> (fc % 8)
+	}
+	snap.Query = cpacf.Query{Available: true, KIMD: kimd}
+
+	out := Render(snap)
+	for _, want := range []string{
+		`zcrypt_cpacf_query_function{instruction="KIMD",function="KIMD-SHAKE128",code="36"} 1`,
+		`zcrypt_cpacf_query_function{instruction="KIMD",function="KIMD-SHAKE256",code="37"} 1`,
+		`zcrypt_cpacf_query_function{instruction="KIMD",function="KIMD-SHA3-256",code="33"} 1`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing query row %q", want)
+		}
+	}
+	// A code that is absent must still be exported, as 0.
+	if !strings.Contains(out, `function="KIMD-GHASH",code="65"} 0`) {
+		t.Error("absent function codes must be exported as 0, not omitted")
 	}
 }
 

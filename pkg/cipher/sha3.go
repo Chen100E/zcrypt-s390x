@@ -173,19 +173,114 @@ func (v SHA3Variant) KernelName() string {
 	return ""
 }
 
+// sponge is the Keccak sponge machinery shared by the fixed-output SHA-3
+// digests and the SHAKE extendable-output functions.
+//
+// Everything that separates those two families lives outside this type: the
+// domain-separation suffix is an argument to pad, and what happens after the
+// final permutation (truncate to a fixed digest, or stream an unbounded output)
+// is the caller's decision. Absorbing, buffering and the rate arithmetic are
+// identical, so they exist exactly once.
+type sponge struct {
+	state [25]uint64
+	buf   [200]byte // one full rate of pending input, or one output block
+	nbuf  int
+	rate  int
+}
+
+// reset clears the state back to the empty-message sponge.
+func (s *sponge) reset() {
+	for i := range s.state {
+		s.state[i] = 0
+	}
+	s.nbuf = 0
+}
+
+// absorb XORs one rate-sized block of bytes into the state and permutes.
+//
+// The lane load is LittleEndian by definition of SHA-3. See the note on
+// keccakF1600.
+func (s *sponge) absorb(block []byte) {
+	for i := 0; i < s.rate/8; i++ {
+		s.state[i] ^= binary.LittleEndian.Uint64(block[i*8:])
+	}
+	keccakF1600(&s.state)
+}
+
+// write absorbs p, buffering any partial block.
+func (s *sponge) write(p []byte) {
+	// Top up a partial buffer first.
+	if s.nbuf > 0 {
+		need := s.rate - s.nbuf
+		if len(p) < need {
+			copy(s.buf[s.nbuf:], p)
+			s.nbuf += len(p)
+			return
+		}
+		copy(s.buf[s.nbuf:], p[:need])
+		s.absorb(s.buf[:])
+		s.nbuf = 0
+		p = p[need:]
+	}
+
+	// Then absorb whole blocks straight out of the caller's slice: no copy.
+	for len(p) >= s.rate {
+		s.absorb(p[:s.rate])
+		p = p[s.rate:]
+	}
+
+	if len(p) > 0 {
+		copy(s.buf[:], p)
+		s.nbuf = len(p)
+	}
+}
+
+// pad applies FIPS 202 domain separation and the final padding bit to the
+// trailing partial block, then absorbs it.
+//
+// suffix is 0x06 for the SHA-3 digests and 0x1F for SHAKE, which is the
+// four-bit suffix 1111 followed by the first padding bit. The 0x80 sets the
+// last bit of the rate; both land in the same byte when the message ends
+// exactly one byte short of the boundary, which is the case FIPS 202 §B.2
+// spells out and the case a naive implementation gets wrong.
+func (s *sponge) pad(suffix byte) {
+	for i := s.nbuf; i < s.rate; i++ {
+		s.buf[i] = 0
+	}
+	s.buf[s.nbuf] ^= suffix
+	s.buf[s.rate-1] ^= 0x80
+	s.absorb(s.buf[:])
+	s.nbuf = 0
+}
+
+// squeezeBlock serialises the current state's rate bytes into buf, in the same
+// little-endian lane order the sponge absorbs with.
+//
+// Reusing buf is safe because squeezing only starts after pad has consumed the
+// pending input and emptied the buffer. A caller that keeps writing after
+// squeezing would corrupt both, which is why SHAKE.Write refuses to do it.
+func (s *sponge) squeezeBlock() {
+	for i := 0; i < s.rate/8; i++ {
+		binary.LittleEndian.PutUint64(s.buf[i*8:], s.state[i])
+	}
+}
+
+// sha3DomainSuffix is the SHA-3 domain-separation suffix: the two-bit suffix 01
+// followed by the first padding bit, i.e. 0x06. SHAKE uses 0x1F and raw Keccak
+// 0x01, which is why a Keccak implementation without domain separation
+// silently produces the wrong digest for every standardised variant.
+const sha3DomainSuffix = 0x06
+
 // SHA3 is a pure-Go SHA-3 sponge. It implements hash.Hash, so it can be handed
 // to BenchmarkHash alongside the SHA-2 constructors and measured the same way.
 type SHA3 struct {
-	state [25]uint64
-	buf   [200]byte // one full rate worth of pending input
-	nbuf  int
-	rate  int
-	out   int
+	sp  sponge
+	out int
 }
 
 // NewSHA3 returns a hash.Hash for the requested variant.
 func NewSHA3(v SHA3Variant) hash.Hash {
-	return &SHA3{rate: v.rate(), out: v.Size()}
+	return &SHA3{sp: sponge{rate: v.rate()}, out: v.Size()}
 }
 
 // NewSHA3_224 / 256 / 384 / 512 are the concrete constructors.
@@ -195,56 +290,15 @@ func NewSHA3_384() hash.Hash { return NewSHA3(SHA3_384) }
 func NewSHA3_512() hash.Hash { return NewSHA3(SHA3_512) }
 
 func (d *SHA3) Size() int      { return d.out }
-func (d *SHA3) BlockSize() int { return d.rate }
+func (d *SHA3) BlockSize() int { return d.sp.rate }
 
 // Reset clears the sponge back to the empty-message state.
-func (d *SHA3) Reset() {
-	for i := range d.state {
-		d.state[i] = 0
-	}
-	d.nbuf = 0
-}
-
-// absorb XORs one rate-sized block of bytes into the state and permutes.
-//
-// The lane load is LittleEndian by definition of SHA-3. See the note on
-// keccakF1600.
-func (d *SHA3) absorb(block []byte) {
-	for i := 0; i < d.rate/8; i++ {
-		d.state[i] ^= binary.LittleEndian.Uint64(block[i*8:])
-	}
-	keccakF1600(&d.state)
-}
+func (d *SHA3) Reset() { d.sp.reset() }
 
 // Write absorbs p, buffering any partial block.
 func (d *SHA3) Write(p []byte) (int, error) {
-	n := len(p)
-
-	// Top up a partial buffer first.
-	if d.nbuf > 0 {
-		need := d.rate - d.nbuf
-		if len(p) < need {
-			copy(d.buf[d.nbuf:], p)
-			d.nbuf += len(p)
-			return n, nil
-		}
-		copy(d.buf[d.nbuf:], p[:need])
-		d.absorb(d.buf[:])
-		d.nbuf = 0
-		p = p[need:]
-	}
-
-	// Then absorb whole blocks straight out of the caller's slice: no copy.
-	for len(p) >= d.rate {
-		d.absorb(p[:d.rate])
-		p = p[d.rate:]
-	}
-
-	if len(p) > 0 {
-		copy(d.buf[:], p)
-		d.nbuf = len(p)
-	}
-	return n, nil
+	d.sp.write(p)
+	return len(p), nil
 }
 
 // Sum appends the digest to b without disturbing the running state, which is
@@ -255,37 +309,19 @@ func (d *SHA3) Sum(b []byte) []byte {
 	return dup.finalize(b)
 }
 
-// finalize applies the FIPS 202 domain-separation and padding, squeezes the
-// digest and appends it to b.
+// finalize applies the SHA-3 domain separation and padding, squeezes the digest
+// and appends it to b.
 //
-// SHA-3 uses the "SHA3" domain suffix: the message is padded with 0x06 ... 0x80
-// (the 0x06 being the two-bit suffix 01 followed by the first padding bit).
-// That is different from SHAKE's 0x1F and from Keccak's original 0x01, which is
-// why a raw Keccak implementation silently produces the wrong digest.
+// The digest length is not always a multiple of the 8-byte lane size — it is
+// for 256/384/512 but SHA3-224 is 28 bytes, which is 3.5 lanes — but the rate
+// is always at least twice the digest length, so one permutation covers every
+// standard variant and the result is a simple truncation of the output block.
+// Squeezing only d.out/8 lanes would silently drop the last four bytes of
+// SHA3-224 and produce a 24-byte digest that still looked plausible.
 func (d *SHA3) finalize(b []byte) []byte {
-	// Pad the trailing partial block.
-	for i := d.nbuf; i < d.rate; i++ {
-		d.buf[i] = 0
-	}
-	d.buf[d.nbuf] ^= 0x06
-	d.buf[d.rate-1] ^= 0x80
-	d.absorb(d.buf[:])
-
-	// Squeeze: one permutation is enough for every standard SHA-3 variant,
-	// because the rate is always at least twice the digest length.
-	//
-	// The digest length is not always a multiple of the 8-byte lane size — it
-	// is for 256/384/512 but SHA3-224 is 28 bytes, which is 3.5 lanes — so the
-	// lane count rounds up and the result is truncated to the exact byte count.
-	// Squeezing `d.out/8` lanes would silently drop the last four bytes of
-	// SHA3-224 and produce a 24-byte digest that still looked plausible.
-	out := make([]byte, 0, d.out+8)
-	for i := 0; i < (d.out+7)/8; i++ {
-		var lane [8]byte
-		binary.LittleEndian.PutUint64(lane[:], d.state[i])
-		out = append(out, lane[:]...)
-	}
-	return append(b, out[:d.out]...)
+	d.sp.pad(sha3DomainSuffix)
+	d.sp.squeezeBlock()
+	return append(b, d.sp.buf[:d.out]...)
 }
 
 // SHA3Sum is the one-shot helper: SHA3Sum(SHA3_256, msg).
@@ -367,19 +403,26 @@ var NISTSHA3Vectors = []SHA3Vector{
 
 // VectorInput materialises the message bytes for a vector.
 func (v SHA3Vector) VectorInput() []byte {
-	if v.Repeat > 0 {
-		out := make([]byte, v.Repeat)
+	return vectorInput(v.Input, v.RepeatByte, v.Repeat)
+}
+
+// vectorInput materialises a test-vector message from its three possible
+// encodings: a repeat of one byte, a hex string, or the empty message. SHA-3 and
+// SHAKE vectors share the convention, so they share the decoder.
+func vectorInput(hexInput string, repeatByte byte, repeat int) []byte {
+	if repeat > 0 {
+		out := make([]byte, repeat)
 		for i := range out {
-			out[i] = v.RepeatByte
+			out[i] = repeatByte
 		}
 		return out
 	}
-	if v.Input == "" {
+	if hexInput == "" {
 		return nil
 	}
-	out := make([]byte, len(v.Input)/2)
+	out := make([]byte, len(hexInput)/2)
 	for i := 0; i < len(out); i++ {
-		out[i] = hexNibble(v.Input[2*i])<<4 | hexNibble(v.Input[2*i+1])
+		out[i] = hexNibble(hexInput[2*i])<<4 | hexNibble(hexInput[2*i+1])
 	}
 	return out
 }

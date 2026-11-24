@@ -61,6 +61,7 @@ type HardwareCapabilities struct {
 	HasAES      bool `json:"has_aes"`         // MSA-1/2 + KM-AES-128/192/256
 	HasAESGCM   bool `json:"has_aes_gcm"`     // MSA-8 KMA, or MSA-4 KMCTR + GHASH
 	HasSHA3     bool `json:"has_sha3"`        // MSA-6 KIMD/KLMD-SHA3
+	HasSHAKE    bool `json:"has_shake"`       // MSA-6 KIMD/KLMD-SHAKE128/256
 	HasECC      bool `json:"has_ecc"`         // MSA-9 KDSA
 	HasGHASH    bool `json:"has_ghash"`       // MSA-4 KIMD-GHASH
 	HasPRNO     bool `json:"has_prno"`        // MSA-5 PRNO
@@ -181,7 +182,10 @@ func DetectFrom(r io.Reader) HardwareCapabilities {
 	caps.HasAES = caps.HasCPACF
 	// AES-GCM needs either KMA (MSA-8) or the KMCTR+GHASH pair (MSA-4).
 	caps.HasAESGCM = bits[FacilityMSA8] || bits[FacilityMSA4]
-	caps.HasSHA3 = false // refined by Query() / RefineWithQuery
+	// SHA-3 and SHAKE share the MSA-6 rung and neither has a STFLE bit of its
+	// own, so both start false here and are proven only by a Query bitmap.
+	caps.HasSHA3 = false
+	caps.HasSHAKE = false
 
 	sort.Strings(caps.CryptoFeatures)
 	return caps
@@ -213,6 +217,13 @@ func RefineWithQuery(caps HardwareCapabilities, q Query) HardwareCapabilities {
 		q.KIMD.Has(FuncKIMDSHA3_384) && q.KIMD.Has(FuncKIMDSHA3_512) {
 		caps.HasSHA3 = true
 	}
+	// SHAKE is a separate function-code pair in the same KIMD bitmap: 36 and 37.
+	// It is not implied by SHA-3 (a machine may implement one family and not the
+	// other, and the Query bitmap is per-function-code), so it is proven
+	// independently.
+	if q.KIMD.Has(FuncKIMDSHAKE128) && q.KIMD.Has(FuncKIMDSHAKE256) {
+		caps.HasSHAKE = true
+	}
 	if q.KDSA.Available() {
 		caps.HasECC = true
 	}
@@ -231,7 +242,9 @@ func RefineWithQuery(caps HardwareCapabilities, q Query) HardwareCapabilities {
 		caps.MaxMSALevel = maxInt(caps.MaxMSALevel, 9)
 	case q.KMA.Available():
 		caps.MaxMSALevel = maxInt(caps.MaxMSALevel, 8)
-	case caps.HasSHA3:
+	case caps.HasSHA3, caps.HasSHAKE:
+		// SHA-3 (function codes 32-35) and SHAKE (36-37) are both MSA-6, so
+		// either one proves the same rung. Neither raises the level past 6.
 		caps.MaxMSALevel = maxInt(caps.MaxMSALevel, 6)
 	}
 

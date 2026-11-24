@@ -145,6 +145,60 @@ func printSHA3Section(rows []cipher.SHA3DigestResult, kernel []cipher.SHA3Hardwa
 	fmt.Println("test suite checks before either number is reported.")
 }
 
+// printSHAKESection renders the extendable-output function throughput and the
+// kernel-dispatch finding for SHAKE.
+//
+// There is no hardware column, and the section says why rather than leaving the
+// gap unexplained: KIMD/KLMD have SHAKE function codes 36 and 37 and the Query
+// bitmap confirms them, but the kernel registers no shake128/shake256 algorithm,
+// so AF_ALG has nothing to open. The line below the table is generated from the
+// actual /proc/crypto probe, so it will start reporting a driver if one appears.
+func printSHAKESection(rows []cipher.SHAKEDigestResult, kernel []cipher.SHAKEKernelInfo) {
+	if len(rows) == 0 {
+		return
+	}
+	fmt.Println(sectionRule)
+	fmt.Println("SHAKE (pure-Go FIPS 202 XOF)")
+	fmt.Println(sectionRule)
+
+	fmt.Printf("%-9s %10s %14s %8s  %s\n",
+		"VARIANT", "BUFFER", "PURE GO MB/s", "OUT", "BACKEND")
+	for _, r := range rows {
+		if r.Error != "" {
+			fmt.Printf("%-9s %10s %14s %8s  %s\n",
+				r.Variant, humanSize(r.BlockSize), "-", "-", "ERROR: "+r.Error)
+			continue
+		}
+		fmt.Printf("%-9s %10s %14.1f %7dB  %s\n",
+			r.Variant, humanSize(r.BlockSize), r.MBps, r.OutLen, r.Backend)
+	}
+
+	fmt.Println()
+	fmt.Println("Kernel dispatch for SHAKE:")
+	for i, k := range kernel {
+		variant := "SHAKE128"
+		if i == 1 {
+			variant = "SHAKE256"
+		}
+		switch {
+		case k.KernelDriver == "":
+			fmt.Printf("  %-9s no driver registered in /proc/crypto\n", variant)
+		case k.Hardware:
+			fmt.Printf("  %-9s driver %-16s priority %3d  AF_ALG %v\n",
+				variant, k.KernelDriver, k.KernelPriority, k.AFALGAvailable)
+		default:
+			fmt.Printf("  %-9s driver %-16s priority %3d  software\n",
+				variant, k.KernelDriver, k.KernelPriority)
+		}
+	}
+	fmt.Println()
+	fmt.Println("SHAKE is MSA-6 in silicon: KIMD/KLMD function codes 36 (SHAKE128) and 37")
+	fmt.Println("(SHAKE256). The CPACF Query bitmap confirms both, but the kernel registers")
+	fmt.Println("no shake128/shake256 algorithm, so there is no AF_ALG path and no hardware")
+	fmt.Println("number to report here. The figures above are the pure-Go XOF, which is")
+	fmt.Println("bit-exact against FIPS 202 vectors including a squeeze longer than the rate.")
+}
+
 // printECCSection renders the signature benchmarks.
 func printECCSection(rows []cipher.SignatureResult, kernel []cipher.ECCKernelInfo) {
 	if len(rows) == 0 {

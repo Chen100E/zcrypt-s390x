@@ -179,6 +179,7 @@ func Render(s Snapshot) string {
 		{"aes_gcm", s.Caps.HasAESGCM},
 		{"ghash", s.Caps.HasGHASH},
 		{"sha3", s.Caps.HasSHA3},
+		{"shake", s.Caps.HasSHAKE},
 		{"ecc", s.Caps.HasECC},
 		{"prno", s.Caps.HasPRNO},
 		{"wrapped_key", s.Caps.HasWrappedK},
@@ -340,6 +341,8 @@ func queryRows(q cpacf.Query) []queryRow {
 			{"KIMD-SHA-256", cpacf.FuncKIMDSHA256},
 			{"KIMD-SHA-512", cpacf.FuncKIMDSHA512},
 			{"KIMD-SHA3-256", cpacf.FuncKIMDSHA3_256},
+			{"KIMD-SHAKE128", cpacf.FuncKIMDSHAKE128},
+			{"KIMD-SHAKE256", cpacf.FuncKIMDSHAKE256},
 			{"KIMD-GHASH", cpacf.FuncKIMDGHASH},
 		}},
 		{"KDSA", q.KDSA, []struct {

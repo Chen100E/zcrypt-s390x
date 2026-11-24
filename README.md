@@ -228,7 +228,7 @@ curl -s -o /dev/null -w '%{http_code}\n' localhost:9110/healthz   # 200
 | `zcrypt_cpacf_available` | gauge | `arch`, `machine_type` | 1 if CPACF instructions exist |
 | `zcrypt_max_msa_level` | gauge | — | Highest MSA level confirmed by STFLE or CPACF Query |
 | `zcrypt_crypto_features` | gauge | `features` | 1 per confirmed MSA extension level |
-| `zcrypt_capability` | gauge | `feature` | 1 when a CPACF-backed primitive is usable |
+| `zcrypt_capability` | gauge | `feature` | 1 when a CPACF-backed primitive is usable (`aes`, `aes_gcm`, `ghash`, `sha3`, `shake`, `ecc`, `prno`, `wrapped_key`, `vector`, `nnpa`) |
 | `zcrypt_cpacf_query_function` | gauge | `instruction`, `function`, `code` | 1 per function code the hardware Query reports present |
 | `zcrypt_kernel_crypto_hw` | gauge | `algorithm`, `driver`, `priority` | 1 if the kernel dispatches this algorithm to hardware |
 | `zcrypt_kernel_crypto_algorithms` | gauge | `kind` (`total`/`hardware`) | Registered algorithm counts |
@@ -381,7 +381,7 @@ On this host `STFLE` reports the full chain through MSA-13:
 ```
 Hardware CPACF  : true | Max MSA Level: MSA-13
 Crypto Features : msa msa1 msa2 msa3 msa4 msa5 msa6 msa7 msa8 msa9 msa10 msa11 msa12 msa13
-Primitives      : AES=true GCM=true GHASH=true SHA3=true ECC=true PRNO=true
+Primitives      : AES=true GCM=true GHASH=true SHA3=true SHAKE=true ECC=true PRNO=true
 ```
 
 `STFLE` gives the ceiling. What is actually usable is confirmed by running the
@@ -409,6 +409,7 @@ mask `0x80>>(n%8)`, so the 16 bytes read left to right as codes 0-127:
 | 1 | `70` | 9,10,11 | SHA-1, SHA-256, SHA-512 (via `KIMD`/`KLMD`) |
 | 2 | `38` | **18,19,20** | **AES-128, AES-192, AES-256** |
 | 3 | `38` | 26,27,28 | 3DES-192, 3DES-168, 3DES-128 |
+| 4 | `fc` | **32-37** | **SHA3-224/256/384/512 and SHAKE128/256** |
 | 6 | `28` | 50,52 | XTS-AES-128, XTS-AES-256 |
 | 7 | `28` | 58,60 | AES-CFB-128, AES-OFB-128 |
 | 10-11 | `28 28` | 82,84,90,92 | CFB/OFB at the larger block sizes |
@@ -417,6 +418,11 @@ mask `0x80>>(n%8)`, so the 16 bytes read left to right as codes 0-127:
 `0x38` is `0b00111000` — three adjacent bits, which is exactly AES-128/192/256
 in function codes 18/19/20. That is why the AES benchmark can run at all, and
 the same pattern in byte 3 is the three 3DES key sizes.
+
+Byte 4 of `KIMD` is `0xfc` = `0b11111100`: six adjacent bits covering codes 32-37,
+which is the entire FIPS 202 sponge family in one byte — SHA3-224/256/384/512
+(codes 32-35) followed immediately by SHAKE128/SHAKE256 (36-37). Six bits, six
+algorithms, and no gap between the hash variants and the XOFs.
 
 The `KMA` line is the GCM story in one word: byte 0 is `80`, a single bit at
 code 0, and bytes 2-3 are the same `38 38` AES pattern. `KMA` is the only
@@ -539,6 +545,87 @@ hardware instruction's cost is nearly flat.
 
 `./zcrypt --verify` checks 11 FIPS 202 vectors across all four variants,
 including the three 1,000,000-byte cases.
+
+---
+
+## 🌊 SHAKE128 / SHAKE256 Extendable-Output Functions
+
+SHAKE is the other half of the FIPS 202 sponge family, and it is a different
+kind of primitive from a hash. A SHA-3 digest produces N bytes and stops; a SHAKE
+output is an **unbounded stream**, and every prefix of that stream is the answer
+for the corresponding output length. Reading 200 bytes and reading 32 then 168
+must produce the same bytes, and that is the property the test suite pins down
+rather than assuming.
+
+The sponge, the permutation, the little-endian lane order and the rate
+arithmetic are all shared with SHA-3 — the difference is one byte of domain
+separation:
+
+| Family | Padding | Rate |
+| --- | --- | --- |
+| SHA-3 | `0x06` … `0x80` | 144/136/104/72 bytes |
+| SHAKE | `0x1F` … `0x80` | 168 (SHAKE128) / 136 (SHAKE256) bytes |
+
+The `0x1F` is the four-bit suffix `1111` plus the first padding bit. Use the SHA-3
+suffix and SHAKE128 returns the first 32 bytes of `SHA3-256`'s digest — stable,
+self-consistent, and wrong. `TestSHAKEDomainSeparation` asserts that exact
+mistake is not being made.
+
+### Measured throughput, 1 MiB buffer (pure Go)
+
+| Variant | Rate | Pure Go | Digest squeezed |
+| --- | ---: | ---: | ---: |
+| SHAKE128 | 168 B | 87.3 MB/s | 32 B |
+| SHAKE256 | 136 B | 70.1 MB/s | 64 B |
+| *SHA3-256, for comparison* | 136 B | *69.9 MB/s* | *32 B* |
+
+SHAKE256 lands within 0.4% of SHA3-256, which is the structural check that the
+refactor did not change the sponge: same rate, same permutation, same work per
+byte. SHAKE128 is faster for the same reason SHA3-224 is faster than SHA3-256 —
+a wider rate means fewer permutations per byte.
+
+### The hardware has it; the kernel does not expose it
+
+KIMD and KLMD carry SHAKE as function codes **36 (SHAKE128)** and **37
+(SHAKE256)**, both MSA-6. The CPACF Query bitmap on this machine confirms them —
+byte 4 of the KIMD line above is `fc`, which is `0b11111100`, i.e. codes 32-37:
+all four SHA-3 variants *and* both SHAKE variants.
+
+```
+KIMD  (Compute Interm Digest)   : f0 00 00 00 fc 00 00 00 40 00 00 00 00 00 00 01
+```
+
+So `zcrypt` reports `HasSHAKE=true`, exports
+`zcrypt_capability{feature="shake"} 1`, and lists `KIMD-SHAKE128`/`KIMD-SHAKE256`
+as present query rows. There is still **no hardware throughput column**, because
+the kernel registers no `shake128`/`shake256` algorithm with the crypto API
+(`grep -c shake /proc/crypto` returns 0), so AF_ALG has nothing to open. Reaching
+the instruction would mean an out-of-line CPACF caller in assembly, which is
+separate work; a fabricated hardware number would be worse than an honest gap.
+
+`SHAKEKernelDrivers()` re-reads `/proc/crypto` on every run rather than
+hardcoding the negative result, so the report starts showing a driver the day a
+kernel gains one.
+
+### API
+
+```go
+x := cipher.NewSHAKE256()
+x.Write(msg)              // absorb
+out := x.Squeeze(64)      // advance the stream by 64 bytes
+peek := x.Sum(32)         // next 32 bytes WITHOUT advancing
+x.Read(buf)               // io.Reader; never returns io.EOF
+x.Reset()                 // new message
+```
+
+`Sum` copies the state before squeezing, exactly as `hash.Hash.Sum` does, so
+absorb → Sum → absorb → Sum works the way a caller expects. `Write` after
+`squeezing` has begun returns `ErrSHAKESqueezing` rather than producing bytes
+that belong to no message.
+
+`./zcrypt --verify` checks 9 SHAKE vectors including a 200-byte squeeze of each
+variant — longer than either rate, so a single permutation and a truncation
+cannot satisfy them.
 
 ---
 

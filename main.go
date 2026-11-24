@@ -116,6 +116,11 @@ func main() {
 		fmt.Fprintf(os.Stderr, "FATAL: AES-XTS NIST vector mismatch: %v\n", xtsErr)
 		os.Exit(1)
 	}
+	shakePassed, shakeErr := cipher.VerifySHAKEVectors()
+	if shakeErr != nil {
+		fmt.Fprintf(os.Stderr, "FATAL: SHAKE NIST vector mismatch: %v\n", shakeErr)
+		os.Exit(1)
+	}
 
 	if *verifyOnly {
 		fmt.Printf("NIST SHA-256 and SHA-512 verification passed on %s.\n", caps.Endianness)
@@ -127,6 +132,8 @@ func main() {
 			sha3Passed, len(cipher.NISTSHA3Vectors))
 		fmt.Printf("NIST AES-XTS verification passed: %d/%d vectors bit-exact (IEEE 1619, CTS included).\n",
 			xtsPassed, len(cipher.XTSVectors))
+		fmt.Printf("NIST SHAKE verification passed: %d/%d vectors bit-exact (SHAKE128/256, incl. 200-byte squeeze).\n",
+			shakePassed, len(cipher.NISTSHAKEVectors))
 		return
 	}
 
@@ -159,12 +166,14 @@ func main() {
 		aesResults = results
 	}
 
-	// 6. AES mode comparison, SHA-3, ECC and PRNG.
+	// 6. AES mode comparison, SHA-3, SHAKE, ECC and PRNG.
 	modeRows := cipher.AESModeComparisonSuite(256, scale)
 	xtsRows := cipher.XTSSuite(256, scale)
 	xtsKernel := cipher.XTSKernelInfo()
 	sha3Rows := cipher.SHA3Suite(1024*1024, *iterations/10+1)
 	sha3Kernel := cipher.SHA3KernelDrivers()
+	shakeRows := cipher.SHAKESuite(1024*1024, *iterations/10+1)
+	shakeKernel := cipher.SHAKEKernelDrivers()
 	signRows := cipher.SignSuite(*iterations / 4)
 	eccKernel := cipher.ECCKernelReport()
 	prng, prngErr := cipher.RunPRNGSuite(caps, 64*1024, *iterations/2)
@@ -194,6 +203,8 @@ func main() {
 			"xts_kernel":     xtsKernel,
 			"sha3":           sha3Rows,
 			"sha3_kernel":    sha3Kernel,
+			"shake":          shakeRows,
+			"shake_kernel":   shakeKernel,
 			"signatures":     signRows,
 			"ecc_kernel":     eccKernel,
 			"curve_table":    cipher.CurveTable,
@@ -216,6 +227,7 @@ func main() {
 	printModeSection(modeRows)
 	printXTSSection(xtsRows, xtsPassed, len(cipher.XTSVectors), xtsKernel)
 	printSHA3Section(sha3Rows, sha3Kernel)
+	printSHAKESection(shakeRows, shakeKernel)
 	printECCSection(signRows, eccKernel)
 	printPRNGSection(prng, prngInfo, prngErr)
 }
@@ -237,8 +249,8 @@ func printReport(
 	fmt.Printf("Machine Model   : %s\n", caps.MachineType)
 	fmt.Printf("Hardware CPACF  : %v | Max MSA Level: MSA-%d\n", caps.HasCPACF, caps.MaxMSALevel)
 	fmt.Printf("Crypto Features : %s\n", strings.Join(caps.CryptoFeatures, " "))
-	fmt.Printf("Primitives      : AES=%v GCM=%v GHASH=%v SHA3=%v ECC=%v PRNO=%v\n",
-		caps.HasAES, caps.HasAESGCM, caps.HasGHASH, caps.HasSHA3, caps.HasECC, caps.HasPRNO)
+	fmt.Printf("Primitives      : AES=%v GCM=%v GHASH=%v SHA3=%v SHAKE=%v ECC=%v PRNO=%v\n",
+		caps.HasAES, caps.HasAESGCM, caps.HasGHASH, caps.HasSHA3, caps.HasSHAKE, caps.HasECC, caps.HasPRNO)
 	fmt.Printf("Vector Unit(VX) : %v | On-Chip NNPA: %v\n", caps.HasVector, caps.HasNNPA)
 
 	impl := cipher.DetectAESImplementation()

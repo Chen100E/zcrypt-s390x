@@ -89,6 +89,9 @@ machine         : 8561
 	if caps.HasSHA3 {
 		t.Error("HasSHA3 must be false without a Query result")
 	}
+	if caps.HasSHAKE {
+		t.Error("HasSHAKE must be false without a Query result")
+	}
 	if caps.HasPRNO || caps.HasECC || caps.HasWrappedK {
 		t.Error("extension flags must be false without their facility bits")
 	}
@@ -251,4 +254,110 @@ func setFunc(b FunctionBitmap, fc uint) FunctionBitmap {
 		b[fc/8] |= 0x80 >> (fc % 8)
 	}
 	return b
+}
+
+// TestRefineWithQueryDetectsSHAKE covers the detection gap this change closes:
+// the KIMD bitmap carries SHAKE as function codes 36 and 37, and RefineWithQuery
+// must report them independently of SHA-3.
+//
+// The three sub-cases matter because the two families share the MSA-6 rung but
+// not their function codes: a machine can announce one without the other, and a
+// detector that inferred SHAKE from HasSHA3 (or vice versa) would report a
+// capability the silicon may not have.
+func TestRefineWithQueryDetectsSHAKE(t *testing.T) {
+	base := DetectFrom(strings.NewReader(`features	: msa vx
+facilities      : 17 129
+`))
+
+	// SHAKE codes only: SHAKE must be true and SHA-3 false.
+	var shakeOnly FunctionBitmap
+	shakeOnly = setFunc(shakeOnly, FuncKIMDSHAKE128)
+	shakeOnly = setFunc(shakeOnly, FuncKIMDSHAKE256)
+	caps := RefineWithQuery(base, Query{Available: true, KIMD: shakeOnly})
+	if !caps.HasSHAKE {
+		t.Error("HasSHAKE = false with KIMD function codes 36 and 37 present")
+	}
+	if caps.HasSHA3 {
+		t.Error("HasSHA3 = true from SHAKE function codes alone; the two families have distinct codes")
+	}
+	if caps.MaxMSALevel < 6 {
+		t.Errorf("MaxMSALevel = %d, want >= 6 after SHAKE confirmation (SHAKE is MSA-6)", caps.MaxMSALevel)
+	}
+	if caps.MaxMSALevel > 6 {
+		t.Errorf("MaxMSALevel = %d; SHAKE is MSA-6 and must not raise the level past 6", caps.MaxMSALevel)
+	}
+
+	// SHA-3 codes only: SHA-3 must be true and SHAKE false.
+	var sha3Only FunctionBitmap
+	for _, fc := range []uint{FuncKIMDSHA3_224, FuncKIMDSHA3_256, FuncKIMDSHA3_384, FuncKIMDSHA3_512} {
+		sha3Only = setFunc(sha3Only, fc)
+	}
+	caps = RefineWithQuery(base, Query{Available: true, KIMD: sha3Only})
+	if !caps.HasSHA3 {
+		t.Error("HasSHA3 = false with all four SHA-3 function codes present")
+	}
+	if caps.HasSHAKE {
+		t.Error("HasSHAKE = true from SHA-3 function codes alone; 36/37 were not present")
+	}
+
+	// Only one of the two SHAKE codes: not enough to claim the family, matching
+	// how HasSHA3 requires all four SHA-3 codes.
+	var halfSHAKE FunctionBitmap
+	halfSHAKE = setFunc(halfSHAKE, FuncKIMDSHAKE128)
+	caps = RefineWithQuery(base, Query{Available: true, KIMD: halfSHAKE})
+	if caps.HasSHAKE {
+		t.Error("HasSHAKE = true with only SHAKE128 (code 36) present")
+	}
+}
+
+// TestSHAKEFunctionCodes pins the two function-code constants against
+// z/Architecture. They are already declared in query_common.go; this test is the
+// guard against a careless edit, in the same spirit as
+// TestFacilityBitConstants.
+func TestSHAKEFunctionCodes(t *testing.T) {
+	if FuncKIMDSHAKE128 != 36 {
+		t.Errorf("FuncKIMDSHAKE128 = %d, want 36", FuncKIMDSHAKE128)
+	}
+	if FuncKIMDSHAKE256 != 37 {
+		t.Errorf("FuncKIMDSHAKE256 = %d, want 37", FuncKIMDSHAKE256)
+	}
+	// SHA-3 occupies 32..35 and SHAKE 36..37: adjacent but distinct, which is
+	// exactly why the bitmap has to be consulted per code.
+	if FuncKIMDSHA3_512 >= FuncKIMDSHAKE128 {
+		t.Errorf("SHA-3 codes must all precede SHAKE codes: 512 -> %d, SHAKE128 -> %d",
+			FuncKIMDSHA3_512, FuncKIMDSHAKE128)
+	}
+}
+
+// TestDetectReportsSHAKEOnThisMachine records what the hardware actually says.
+//
+// On a real MSA-6+ machine this asserts HasSHAKE is true and logs the evidence;
+// on a host without CPACF (an amd64 CI runner, where ProbeQuery is the !s390x
+// stub) there is nothing to prove, so it skips rather than failing. That is the
+// same contract the SHA-3 hardware tests use.
+func TestDetectReportsSHAKEOnThisMachine(t *testing.T) {
+	caps := Detect()
+	if !caps.HasCPACF {
+		t.Skip("no CPACF on this host; SHAKE detection needs an s390x machine")
+	}
+	q := ProbeQuery(caps)
+	if !q.Available {
+		t.Skipf("CPACF Query unavailable: %s", q.Error)
+	}
+	refined := RefineWithQuery(caps, q)
+
+	// The Query bitmap is the authority. Report what it said either way, so the
+	// test output is evidence rather than a bare pass.
+	t.Logf("KIMD SHAKE128 (code 36) = %v, SHAKE256 (code 37) = %v, KLMD SHAKE128/256 = %v/%v",
+		q.KIMD.Has(FuncKIMDSHAKE128), q.KIMD.Has(FuncKIMDSHAKE256),
+		q.KLMD.Has(FuncKIMDSHAKE128), q.KLMD.Has(FuncKIMDSHAKE256))
+	t.Logf("HasSHAKE = %v, HasSHA3 = %v, MaxMSALevel = %d",
+		refined.HasSHAKE, refined.HasSHA3, refined.MaxMSALevel)
+
+	if !refined.HasSHAKE {
+		t.Error("HasSHAKE = false, but KIMD reported SHAKE function codes on this machine")
+	}
+	if refined.MaxMSALevel < 6 {
+		t.Errorf("MaxMSALevel = %d, want >= 6 with SHAKE present", refined.MaxMSALevel)
+	}
 }
