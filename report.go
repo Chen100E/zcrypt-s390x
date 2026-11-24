@@ -184,6 +184,88 @@ func printECCSection(rows []cipher.SignatureResult, kernel []cipher.ECCKernelInf
 	fmt.Println("/proc/crypto is expected and does not mean the numbers above are software.")
 }
 
+// printXTSSection renders the AES-XTS known-answer result and the
+// software-versus-KMF throughput comparison.
+//
+// This section exists because XTS is the one mode in the table that Go's
+// standard library does not implement, so the "pure Go" column here is not
+// crypto/cipher driving CPACF blocks — it is this package's own tweak loop
+// wrapped around them. The gap between the two columns is therefore the cost of
+// doing the GF(2^128) multiply and the XORs in Go instead of in KMF, which is a
+// different and more interesting number than a pure AES-round comparison.
+func printXTSSection(rows []cipher.XTSResult, vectorsPassed, vectorTotal int, info cipher.XTSHardwareInfo) {
+	fmt.Println(sectionRule)
+	fmt.Println("AES-XTS (IEEE 1619-2007 / NIST SP 800-38E)")
+	fmt.Println(sectionRule)
+
+	fmt.Printf("Known-answer vectors : %d/%d bit-exact (NIST CAVP + CTS cases)\n", vectorsPassed, vectorTotal)
+	driver := info.KernelDriver
+	if driver == "" {
+		driver = "(none registered)"
+	}
+	fmt.Printf("Kernel driver        : %s (priority %d)\n", driver, info.KernelPriority)
+	fmt.Printf("AF_ALG reachable     : %v\n", info.AFALGAvailable)
+	if len(info.Alternatives) > 0 {
+		fmt.Printf("Registered drivers   : %s\n", strings.Join(info.Alternatives, ", "))
+	}
+	if info.Error != "" {
+		fmt.Printf("Note                 : %s\n", firstLine(info.Error))
+	}
+	fmt.Println()
+
+	if len(rows) == 0 {
+		return
+	}
+
+	fmt.Printf("%-8s %-8s %14s %14s %14s %9s  %s\n",
+		"MODE", "BUFFER", "GO ENC MB/s", "GO DEC MB/s", "KMF ENC MB/s", "SPEEDUP", "VERIFIED")
+	for _, r := range rows {
+		label := fmt.Sprintf("XTS-%d", r.KeyBits)
+		if r.Error != "" {
+			fmt.Printf("%-8s %-8s %14s %14s %14s %9s  %s\n",
+				label, humanSize(r.BlockSize), "-", "-", "-", "-", "ERROR: "+firstLine(r.Error))
+			continue
+		}
+		hw := "-"
+		sp := "-"
+		if r.HardwareMBps > 0 {
+			hw = fmt.Sprintf("%.1f", r.HardwareMBps)
+			sp = fmt.Sprintf("%.2fx", r.Speedup)
+		} else if r.HardwareError != "" {
+			hw = "n/a"
+			sp = "n/a"
+		}
+		verified := "no"
+		if r.Verified {
+			verified = "yes"
+		}
+		fmt.Printf("%-8s %-8s %14.1f %14.1f %14s %9s  %s\n",
+			label, humanSize(r.BlockSize), r.EncryptMBps, r.DecryptMBps, hw, sp, verified)
+	}
+	if rows[0].HardwareError != "" {
+		fmt.Println()
+		fmt.Printf("KMF column unavailable: %s\n", firstLine(rows[0].HardwareError))
+	}
+
+	fmt.Println()
+	fmt.Println("Go has no cipher.NewXTS, so the portable path above is this project's own")
+	fmt.Println("implementation: crypto/aes lowers each block to the CPU's AES, but the")
+	fmt.Println("tweak doubling and the XORs run in Go.")
+	if info.Hardware {
+		fmt.Println("The kernel path binds AF_ALG to xts(aes), which dispatches to")
+		fmt.Println("xts-aes-s390 (priority 402) and issues KMF (function codes 50/52,")
+		fmt.Println("MSA-4), where the tweak multiply, the XOR and the cipher happen in one")
+		fmt.Println("instruction. That is the column the portable path is being compared to.")
+	} else {
+		fmt.Printf("The kernel path binds AF_ALG to xts(aes), which on this host is %q.\n", driver)
+		fmt.Println("It is not a CPACF driver, so the comparison measures a different")
+		fmt.Println("kernel implementation rather than KMF; on s390x the same code reaches")
+		fmt.Println("xts-aes-s390 and KMF.")
+	}
+	fmt.Println("Both paths reproduce the same CAVP ciphertext, which the test suite")
+	fmt.Println("checks before either number is reported.")
+}
+
 // printPRNGSection renders the PRNG measurements.
 func printPRNGSection(res cipher.PRNGSuiteResult, info cipher.PRNGInfo, err error) {
 	fmt.Println(sectionRule)

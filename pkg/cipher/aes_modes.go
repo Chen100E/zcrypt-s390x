@@ -57,6 +57,10 @@ const (
 	// per-block cost baseline. It must never be used for real data: identical
 	// plaintext blocks produce identical ciphertext blocks.
 	ModeECB AESMode = "ECB"
+	// ModeXTS is XEX-based tweaked codebook with ciphertext stealing (IEEE
+	// 1619-2007, NIST SP 800-38E). It is the mode dm-crypt/LUKS uses, and the
+	// only one in this table that Go's standard library does not implement.
+	ModeXTS AESMode = "XTS"
 )
 
 // AESModeInfo documents how one mode maps onto CPACF hardware.
@@ -109,6 +113,15 @@ var AESModeTable = []AESModeInfo{
 		Parallel:    true,
 		Auth:        true,
 		Notes:       "AES rounds and GHASH fused in one instruction; KMCTR + KIMD-GHASH is the MSA-4..7 fallback",
+	},
+	{
+		Mode:        ModeXTS,
+		Instruction: "KMF",
+		MSALevel:    4,
+		GoPath:      "pure Go (crypto/aes blocks -> KM); AF_ALG xts(aes) -> xts-aes-s390 -> kmf()",
+		Parallel:    true,
+		Auth:        false,
+		Notes:       "Go's stdlib has no XTS, so the portable path is this package's own Go code over KM blocks; the kernel path is KMF (function codes 50/52), which does the tweak multiply, XOR and cipher in one instruction. Tweak arithmetic stays in Go on the portable path, which is why it is slower per byte than CBC despite being parallel.",
 	},
 }
 
@@ -167,6 +180,28 @@ func AESModeBenchmark(mode AESMode, keyBits, blockSize, iterations int) (AESMode
 	if iterations <= 0 {
 		return res, errors.New("aes: iterations must be positive")
 	}
+
+	// XTS is measured by its own benchmark, which supports ciphertext stealing
+	// and therefore accepts buffer sizes the other modes cannot. Delegating here
+	// rather than duplicating keeps AESModeComparison and AESModeComparisonSuite
+	// uniform over AESModeTable: one row per mode, no special cases at the call
+	// site.
+	if mode == ModeXTS {
+		xr, err := XTSBenchmark(keyBits, blockSize, iterations)
+		if err != nil {
+			return res, err
+		}
+		res.KeyBits = xr.KeyBits
+		res.BlockSize = xr.BlockSize
+		res.Iterations = xr.Iterations
+		res.EncryptMBps = xr.EncryptMBps
+		res.DecryptMBps = xr.DecryptMBps
+		res.EncryptNanos = xr.EncryptNanos
+		res.DecryptNanos = xr.DecryptNanos
+		res.Verified = xr.Verified
+		return res, nil
+	}
+
 	if mode != ModeGCM && blockSize%aes.BlockSize != 0 {
 		return res, fmt.Errorf("aes-%s: buffer size %d is not a multiple of the %d-byte block",
 			mode, blockSize, aes.BlockSize)
@@ -315,7 +350,7 @@ func AESModeBenchmark(mode AESMode, keyBits, blockSize, iterations int) (AESMode
 // table with one missing row is still useful, and on a machine below MSA-8 the
 // GCM row legitimately behaves differently.
 func AESModeComparison(keyBits, blockSize, iterations int) []AESModeResult {
-	modes := []AESMode{ModeECB, ModeCBC, ModeCTR, ModeGCM}
+	modes := []AESMode{ModeECB, ModeCBC, ModeCTR, ModeGCM, ModeXTS}
 	out := make([]AESModeResult, 0, len(modes))
 	for _, m := range modes {
 		r, err := AESModeBenchmark(m, keyBits, blockSize, iterations)
@@ -448,7 +483,15 @@ var NISTSP80038AVectors = []AESModeVector{
 // EncryptWithMode applies one NIST vector's mode to the given plaintext. It is
 // the shared helper behind both the vector check and the mode round-trip tests,
 // so there is exactly one place where "how do I drive this mode" is decided.
+//
+// For XTS the key argument is the concatenated 32- or 64-byte XTS key and the iv
+// argument is the 16-byte tweak, because that is what those two parameters mean
+// for that mode. XTS is dispatched before aes.NewCipher is called: a 64-byte key
+// is not an AES key, so the generic constructor would reject it.
 func EncryptWithMode(mode AESMode, key, iv, plaintext []byte) ([]byte, error) {
+	if mode == ModeXTS {
+		return XTSEncrypt(key, iv, plaintext)
+	}
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		return nil, fmt.Errorf("new cipher: %w", err)
@@ -486,6 +529,9 @@ func EncryptWithMode(mode AESMode, key, iv, plaintext []byte) ([]byte, error) {
 
 // DecryptWithMode is the inverse of EncryptWithMode.
 func DecryptWithMode(mode AESMode, key, iv, ciphertext []byte) ([]byte, error) {
+	if mode == ModeXTS {
+		return XTSDecrypt(key, iv, ciphertext)
+	}
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		return nil, fmt.Errorf("new cipher: %w", err)

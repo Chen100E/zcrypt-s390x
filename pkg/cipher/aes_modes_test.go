@@ -234,8 +234,20 @@ func TestAESModeInvalidInputs(t *testing.T) {
 	if _, err := EncryptWithMode(ModeECB, good16, nil, make([]byte, 15)); err == nil {
 		t.Error("ECB accepted a 15-byte plaintext")
 	}
-	if _, err := EncryptWithMode(AESMode("XTS"), good32, good16, pt); err == nil {
+	if _, err := EncryptWithMode(AESMode("OFB"), good32, good16, pt); err == nil {
 		t.Error("unknown mode was accepted")
+	}
+	// XTS is now a real mode. A 32-byte key is a legal XTS-AES-128 key, but a
+	// 16-byte tweak with a 15-byte data unit is not, and a 16-byte key is not an
+	// XTS key at all.
+	if _, err := EncryptWithMode(ModeXTS, good16, good16, pt); err == nil {
+		t.Error("XTS accepted a 16-byte key")
+	}
+	if _, err := EncryptWithMode(ModeXTS, good32, make([]byte, 15), pt); err == nil {
+		t.Error("XTS accepted a 15-byte tweak")
+	}
+	if _, err := EncryptWithMode(ModeXTS, good32, good16, make([]byte, 15)); err == nil {
+		t.Error("XTS accepted a 15-byte data unit")
 	}
 	if _, err := DecryptWithMode(ModeGCM, good32, make([]byte, 12), make([]byte, 8)); err == nil {
 		t.Error("GCM accepted a truncated ciphertext as valid")
@@ -247,7 +259,7 @@ func TestAESModeInvalidInputs(t *testing.T) {
 // CPACF instruction, and the MSA level claimed must not exceed what the table's
 // ordering implies.
 func TestAESModeTableIsConsistent(t *testing.T) {
-	wantModes := []AESMode{ModeECB, ModeCBC, ModeCTR, ModeGCM}
+	wantModes := []AESMode{ModeECB, ModeCBC, ModeCTR, ModeGCM, ModeXTS}
 	if len(AESModeTable) != len(wantModes) {
 		t.Fatalf("AESModeTable has %d entries, want %d", len(AESModeTable), len(wantModes))
 	}
@@ -283,6 +295,20 @@ func TestAESModeTableIsConsistent(t *testing.T) {
 	if info, _ := LookupAESMode(ModeECB); info.Instruction != "KM" {
 		t.Errorf("ECB must map to KM, table says %s", info.Instruction)
 	}
+	// XTS is the KMF mode: the instruction that exists specifically to do the
+	// tweak multiply and the cipher in one pass. MSA-4 is where KMF appeared.
+	if info, _ := LookupAESMode(ModeXTS); info.Instruction != "KMF" {
+		t.Errorf("XTS must map to KMF, table says %s", info.Instruction)
+	}
+	if info, _ := LookupAESMode(ModeXTS); info.MSALevel != 4 {
+		t.Errorf("XTS must claim MSA-4, table says MSA-%d", info.MSALevel)
+	}
+	if !mustLookup(t, ModeXTS).Parallel {
+		t.Error("XTS must be marked parallel: blocks are independent once the tweak is derived")
+	}
+	if mustLookup(t, ModeXTS).Auth {
+		t.Error("XTS must not be marked authenticated: it has no tag")
+	}
 	// CTR and GCM are parallel; CBC and ECB are not.
 	if !mustLookup(t, ModeCTR).Parallel || !mustLookup(t, ModeGCM).Parallel {
 		t.Error("CTR and GCM must be marked parallel")
@@ -305,7 +331,7 @@ func mustLookup(t *testing.T, m AESMode) AESModeInfo {
 // small size and asserts the harness reports verified round trips, plausible
 // throughput, and a setup cost that was measured separately.
 func TestAESModeBenchmarkProducesVerifiedResults(t *testing.T) {
-	for _, mode := range []AESMode{ModeECB, ModeCBC, ModeCTR, ModeGCM} {
+	for _, mode := range []AESMode{ModeECB, ModeCBC, ModeCTR, ModeGCM, ModeXTS} {
 		res, err := AESModeBenchmark(mode, 256, 16*1024, 20)
 		if err != nil {
 			t.Fatalf("%s: %v", mode, err)
@@ -377,7 +403,7 @@ func TestAESModeComparisonCoversAllModes(t *testing.T) {
 			t.Errorf("%s: key bits = %d, want 128", r.Mode, r.KeyBits)
 		}
 	}
-	for _, m := range []AESMode{ModeECB, ModeCBC, ModeCTR, ModeGCM} {
+	for _, m := range []AESMode{ModeECB, ModeCBC, ModeCTR, ModeGCM, ModeXTS} {
 		if !seen[m] {
 			t.Errorf("comparison omitted mode %s", m)
 		}

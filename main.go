@@ -111,6 +111,11 @@ func main() {
 		fmt.Fprintf(os.Stderr, "FATAL: SHA-3 NIST vector mismatch: %v\n", sha3Err)
 		os.Exit(1)
 	}
+	xtsPassed, xtsErr := cipher.VerifyXTSVectors()
+	if xtsErr != nil {
+		fmt.Fprintf(os.Stderr, "FATAL: AES-XTS NIST vector mismatch: %v\n", xtsErr)
+		os.Exit(1)
+	}
 
 	if *verifyOnly {
 		fmt.Printf("NIST SHA-256 and SHA-512 verification passed on %s.\n", caps.Endianness)
@@ -120,6 +125,8 @@ func main() {
 			modeVectorsPassed, len(cipher.NISTSP80038AVectors))
 		fmt.Printf("NIST SHA-3 verification passed: %d/%d vectors bit-exact (224/256/384/512).\n",
 			sha3Passed, len(cipher.NISTSHA3Vectors))
+		fmt.Printf("NIST AES-XTS verification passed: %d/%d vectors bit-exact (IEEE 1619, CTS included).\n",
+			xtsPassed, len(cipher.XTSVectors))
 		return
 	}
 
@@ -154,6 +161,8 @@ func main() {
 
 	// 6. AES mode comparison, SHA-3, ECC and PRNG.
 	modeRows := cipher.AESModeComparisonSuite(256, scale)
+	xtsRows := cipher.XTSSuite(256, scale)
+	xtsKernel := cipher.XTSKernelInfo()
 	sha3Rows := cipher.SHA3Suite(1024*1024, *iterations/10+1)
 	sha3Kernel := cipher.SHA3KernelDrivers()
 	signRows := cipher.SignSuite(*iterations / 4)
@@ -171,6 +180,7 @@ func main() {
 			"nist_gcm_vectors_passed":  vectorsPassed,
 			"nist_mode_vectors_passed": modeVectorsPassed,
 			"nist_sha3_vectors_passed": sha3Passed,
+			"nist_xts_vectors_passed":  xtsPassed,
 			"throughput_mbps": map[string]interface{}{
 				"sha256_64k": sha256_64K,
 				"sha512_64k": sha512_64K,
@@ -180,6 +190,8 @@ func main() {
 			"aes256gcm":      aesResults,
 			"aes_modes":      modeRows,
 			"aes_mode_table": cipher.AESModeTable,
+			"aes_xts":        xtsRows,
+			"xts_kernel":     xtsKernel,
 			"sha3":           sha3Rows,
 			"sha3_kernel":    sha3Kernel,
 			"signatures":     signRows,
@@ -202,6 +214,7 @@ func main() {
 
 	printReport(caps, query, kernel, aesResults, sha256_64K, sha512_64K, sha256_1M, sha512_1M, vectorsPassed)
 	printModeSection(modeRows)
+	printXTSSection(xtsRows, xtsPassed, len(cipher.XTSVectors), xtsKernel)
 	printSHA3Section(sha3Rows, sha3Kernel)
 	printECCSection(signRows, eccKernel)
 	printPRNGSection(prng, prngInfo, prngErr)
