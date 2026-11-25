@@ -1,1 +1,5 @@
 zcrypt
+
+# Generated daily benchmark reports — not tracked
+docs/benchmarks/crypto_report_*.json
+docs/benchmarks/crypto_report_*.md
